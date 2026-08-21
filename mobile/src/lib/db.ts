@@ -130,7 +130,7 @@ export function base64ToBytes(b64: string): Uint8Array {
 }
 
 export async function writeDataFile(path: string, data: string): Promise<void> {
-  await Filesystem.writeFile({ path, data, directory: Directory.Data });
+  await Filesystem.writeFile({ path, data, directory: Directory.Data, recursive: true });
 }
 
 export async function readDataFile(path: string): Promise<string | null> {

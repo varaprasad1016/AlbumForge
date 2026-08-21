@@ -29,6 +29,7 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
   const [view, setView] = useState<View>("photos");
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState<ImportProgress | null>(null);
+  const [importNote, setImportNote] = useState("");
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState("");
   const [prompt, setPrompt] = useState<{ title: string; initial: string; onConfirm: (v: string) => void } | null>(null);
@@ -110,8 +111,14 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
     const files = await window.albumforge.dialogs.chooseImages();
     if (!files || files.length === 0) return;
     setImporting(true);
+    setImportNote("");
     try {
-      await window.albumforge.photos.importPhotos(projectId, files);
+      const result = await window.albumforge.photos.importPhotos(projectId, files);
+      setImportNote(
+        result.failed > 0
+          ? `${result.imported} imported, ${result.failed} failed`
+          : `${result.imported} imported`,
+      );
       await loadGroups();
       await loadPhotos(true);
     } finally {
@@ -228,6 +235,10 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
             <div className="h-1.5 rounded-full bg-gradient-to-r from-indigo-500 to-violet-600" style={{ width: `${(progress.current / progress.total) * 100}%` }} />
           </div>
         </div>
+      )}
+
+      {importNote && !importing && (
+        <div className="mb-3 rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700">{importNote}</div>
       )}
 
       {/* Segmented tabs */}
