@@ -1,17 +1,30 @@
 import { useEffect, useState } from "react";
-import type { AppInfo } from "@shared/api";
+import type { AppInfo, UpdateEvent } from "@shared/api";
 
-type UpdatePhase = "idle" | "checking" | "uptodate" | "available" | "error";
+type UpdatePhase = "idle" | "checking" | "uptodate" | "available" | "downloading" | "downloaded" | "error";
 
 export default function SettingsPage() {
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [phase, setPhase] = useState<UpdatePhase>("idle");
   const [version, setVersion] = useState("");
+  const [percent, setPercent] = useState(0);
   const [error, setError] = useState("");
   const [cacheCleared, setCacheCleared] = useState(false);
 
   useEffect(() => {
     window.albumforge.info().then(setInfo);
+    const off = window.albumforge.onUpdateEvent((e: UpdateEvent) => {
+      if (e.type === "progress") {
+        setPercent(e.percent);
+        setPhase("downloading");
+      } else if (e.type === "downloaded") {
+        setPhase("downloaded");
+      } else if (e.type === "error") {
+        setError(e.message);
+        setPhase("error");
+      }
+    });
+    return off;
   }, []);
 
   async function clearCache() {
@@ -40,6 +53,28 @@ export default function SettingsPage() {
     }
   }
 
+  async function downloadUpdate() {
+    setError("");
+    setPercent(0);
+    setPhase("downloading");
+    try {
+      await window.albumforge.downloadUpdate();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setPhase("error");
+    }
+  }
+
+  async function installUpdate() {
+    setError("");
+    try {
+      await window.albumforge.installUpdate();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setPhase("error");
+    }
+  }
+
   return (
     <div>
       <h1 className="mb-4 text-xl font-bold">Settings</h1>
@@ -56,12 +91,40 @@ export default function SettingsPage() {
             {phase === "available" && (
               <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-3">
                 <p className="font-medium text-ink">Version v{version} is available</p>
-                <button onClick={() => void window.albumforge.installUpdate()} className="btn-primary mt-2 w-full">
+                <button onClick={downloadUpdate} className="btn-primary mt-2 w-full">
                   Download update
                 </button>
               </div>
             )}
-            {phase === "error" && <p className="text-red-600">{error}</p>}
+            {phase === "downloading" && (
+              <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-3">
+                <p className="font-medium text-ink">Downloading update… {percent}%</p>
+                <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-indigo-100">
+                  <div className="h-2 rounded-full bg-gradient-to-r from-indigo-500 to-violet-600 transition-all" style={{ width: `${percent}%` }} />
+                </div>
+              </div>
+            )}
+            {phase === "downloaded" && (
+              <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-3">
+                <p className="font-medium text-ink">Update v{version} downloaded</p>
+                <button onClick={installUpdate} className="btn-primary mt-2 w-full">
+                  Install update
+                </button>
+                <p className="mt-2 text-xs text-slate-500">
+                  Your device will ask you to confirm the installation.
+                </p>
+              </div>
+            )}
+            {phase === "error" && (
+              <div className="rounded-lg border border-red-100 bg-red-50 p-3">
+                <p className="text-red-600">{error}</p>
+                {version && (
+                  <button onClick={installUpdate} className="btn-secondary mt-2 w-full">
+                    Install update
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </section>
 

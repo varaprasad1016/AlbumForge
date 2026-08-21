@@ -1,14 +1,21 @@
 /** Mobile backend entry: builds `window.albumforge` from the module pieces. */
-import type { AlbumForgeApi } from "./api";
+import type { AlbumForgeApi, UpdateEvent } from "./api";
 import { initDb, persistDb } from "./db";
 import { seedTemplates } from "./seed";
 import { assetUrl, fontUrl, onProgress } from "./backend-helpers";
 import { buildCrudApi } from "./backend-crud";
 import { buildAlbumsApi } from "./backend-albums";
+import { UpdateInstaller } from "./update-installer";
 
-const MOBILE_VERSION = "0.1.3";
+const APP_VERSION = __APP_VERSION__;
 
-async function latestMobileRelease(): Promise<{ html_url: string; version: string } | null> {
+interface MobileReleaseInfo {
+  html_url: string;
+  version: string;
+  assetUrl: string | null;
+}
+
+async function latestMobileRelease(): Promise<MobileReleaseInfo | null> {
   const res = await fetch("https://api.github.com/repos/varaprasad1016/AlbumForge/releases");
   if (!res.ok) return null;
   const releases = await res.json();
@@ -16,40 +23,76 @@ async function latestMobileRelease(): Promise<{ html_url: string; version: strin
     .filter((r: any) => (r.tag_name || "").startsWith("m-") && !r.draft)
     .sort((a: any, b: any) => (b.published_at || "").localeCompare(a.published_at || ""))[0];
   if (!mobile) return null;
-  return { html_url: mobile.html_url, version: String(mobile.tag_name).replace(/^m-v/, "") };
+  const apk = (mobile.assets || []).find((a: any) => String(a.name).endsWith(".apk"));
+  return {
+    html_url: mobile.html_url,
+    version: String(mobile.tag_name).replace(/^m-/, ""),
+    assetUrl: apk ? apk.browser_download_url : null,
+  };
 }
+
+const updateListeners = new Set<(e: UpdateEvent) => void>();
+function emitUpdate(e: UpdateEvent): void {
+  for (const cb of updateListeners) cb(e);
+}
+
+let downloadedPath: string | null = null;
 
 export async function initBackend(): Promise<void> {
   await initDb();
   seedTemplates();
   await persistDb();
 
+  void UpdateInstaller.addListener("downloadProgress", (data) => {
+    emitUpdate({ type: "progress", percent: data.percent });
+  });
+
   const api: AlbumForgeApi = {
     info: () =>
-      Promise.resolve({ version: MOBILE_VERSION, author: "Vara", dataPath: "App storage", cachePath: "App storage" }),
+      Promise.resolve({ version: APP_VERSION, author: "Vara", dataPath: "App storage", cachePath: "App storage" }),
     openPath: () => Promise.resolve(),
     clearCache: async () => {},
     openDataFolder: async () => {},
     checkForUpdates: async () => {
       try {
         const mobile = await latestMobileRelease();
-        if (!mobile) return "No updates available.";
-        if (mobile.version && mobile.version !== MOBILE_VERSION) return `Update available: v${mobile.version}`;
+        if (!mobile || !mobile.assetUrl) return "No updates available.";
+        if (mobile.version !== APP_VERSION) return `Update available: v${mobile.version}`;
         return "You are up to date.";
       } catch {
         return "Could not check for updates.";
       }
     },
-    installUpdate: async () => {
+    downloadUpdate: async () => {
+      const mobile = await latestMobileRelease();
+      if (!mobile || !mobile.assetUrl) throw new Error("No update available to download.");
+      emitUpdate({ type: "checking" });
       try {
-        const mobile = await latestMobileRelease();
-        window.open(mobile ? mobile.html_url : "https://github.com/varaprasad1016/AlbumForge/releases", "_blank");
-      } catch {
-        window.open("https://github.com/varaprasad1016/AlbumForge/releases", "_blank");
+        const res = await UpdateInstaller.downloadApk({
+          url: mobile.assetUrl,
+          fileName: `AlbumForge-${mobile.version}.apk`,
+        });
+        downloadedPath = res.path;
+        emitUpdate({ type: "downloaded", version: mobile.version });
+      } catch (e) {
+        emitUpdate({ type: "error", message: e instanceof Error ? e.message : String(e) });
+        throw e;
       }
     },
-    downloadUpdate: async () => {},
-    onUpdateEvent: () => () => {},
+    installUpdate: async () => {
+      if (!downloadedPath) throw new Error("Download the update first.");
+      const res = await UpdateInstaller.installApk({ path: downloadedPath });
+      if (res.needsPermission) {
+        emitUpdate({
+          type: "error",
+          message: "Allow installs from AlbumForge in the system settings that just opened, then tap Install update again.",
+        });
+      }
+    },
+    onUpdateEvent: (cb) => {
+      updateListeners.add(cb);
+      return () => updateListeners.delete(cb);
+    },
     assets: {
       url: (kind: string, id: string) => assetUrl(kind, id),
       font: (family: string) => fontUrl(family),
