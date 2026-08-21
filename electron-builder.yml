@@ -13,6 +13,7 @@ publish:
   - provider: github
     owner: varaprasad1016
     repo: AlbumForge
+    releaseType: release
 win:
   target:
     - nsis
