@@ -56,7 +56,33 @@ jobs:
 
       - name: Publish APK to release
         if: startsWith(github.ref, 'refs/tags/m-')
-        uses: softprops/action-gh-release@v2
-        with:
-          prerelease: true
-          files: mobile/android/app/build/outputs/apk/debug/*.apk
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -e
+          APK=$(ls mobile/android/app/build/outputs/apk/debug/*.apk | head -n1)
+          TAG="${GITHUB_REF_NAME}"
+          REPO="$GITHUB_REPOSITORY"
+          BASE="https://api.github.com/repos/$REPO"
+          AUTH="Authorization: Bearer $GH_TOKEN"
+          UA="User-Agent: albumforge-ci"
+          REL=$(curl -s -H "$AUTH" -H "$UA" "$BASE/releases/tags/$TAG")
+          if echo "$REL" | grep -q '"message": "Not Found"'; then
+            REL=$(curl -s -X POST -H "$AUTH" -H "$UA" -H "Content-Type: application/json" \
+              -d "{\"tag_name\":\"$TAG\",\"name\":\"AlbumForge $TAG\",\"prerelease\":true}" "$BASE/releases")
+          fi
+          REL_ID=$(echo "$REL" | jq -r '.id')
+          for AID in $(echo "$REL" | jq -r '.assets[]?.id'); do
+            curl -s -X DELETE -H "$AUTH" -H "$UA" "$BASE/releases/assets/$AID" -o /dev/null || true
+          done
+          UPLOAD_URL=$(echo "$REL" | jq -r '.upload_url' | sed 's/{?name,label}//')
+          RESP=$(curl -s -X POST -H "$AUTH" -H "$UA" -H "Content-Type: application/vnd.android.package-archive" \
+            --data-binary @"$APK" "$UPLOAD_URL?name=$(basename "$APK")")
+          echo "$RESP"
+          if ! echo "$RESP" | grep -q '"browser_download_url"'; then
+            curl -s -X PATCH -H "$AUTH" -H "$UA" -H "Content-Type: application/json" \
+              -d "{\"body\":\"publish failed: $RESP\"}" "$BASE/releases/$REL_ID" -o /dev/null
+            echo "APK upload failed"
+            exit 1
+          fi
