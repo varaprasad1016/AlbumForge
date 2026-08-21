@@ -33,6 +33,7 @@ jobs:
           name: albumforge-windows
           path: |
             dist/*.exe
+            dist/*.blockmap
             dist/latest.yml
 
       - name: Publish installer to release
@@ -41,4 +42,5 @@ jobs:
         with:
           files: |
             dist/*.exe
+            dist/*.blockmap
             dist/latest.yml
