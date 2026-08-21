@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     tags:
-      - "mac-*"
+      - "v[0-9]*"
 
 permissions:
   contents: write
@@ -25,22 +25,25 @@ jobs:
       - name: Build web + main/preload
         run: npm run build
 
-      - name: Build macOS app (unsigned)
+      - name: Build macOS app (ad-hoc signed, no developer cert)
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: npx electron-builder --mac --publish never
 
-      - name: Upload DMG artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: albumforge-macos
           path: |
             dist/*.dmg
             dist/*.zip
+            dist/latest-mac.yml
 
-      - name: Publish DMG to release
-        if: startsWith(github.ref, 'refs/tags/mac-')
+      - name: Publish to release (desktop update channel)
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          prerelease: true
-          files: dist/*.dmg
+          files: |
+            dist/*.dmg
+            dist/*.zip
+            dist/latest-mac.yml

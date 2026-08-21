@@ -17,6 +17,7 @@ publish:
     owner: varaprasad1016
     repo: AlbumForge
     releaseType: release
+afterPack: scripts/after-pack.cjs
 win:
   target:
     - nsis

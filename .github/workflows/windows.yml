@@ -22,30 +22,13 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build (electron-vite)
-        run: npm run build
-
-      - name: Package (electron-builder)
-        id: package
+      - name: Build and package (NSIS installer)
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
           GH_TOKEN: ${{ github.token }}
-        run: npx electron-builder --win --publish never *> package.log
-        continue-on-error: true
-
-      - name: Upload package log on failure
-        if: steps.package.outcome != 'success'
-        uses: actions/upload-artifact@v4
-        with:
-          name: package-log
-          path: package.log
-
-      - name: Fail job if packaging failed
-        if: steps.package.outcome != 'success'
-        run: Get-Content package.log; exit 1
+        run: npm run dist
 
       - name: Upload installer artifact
-        if: steps.package.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: albumforge-windows
@@ -54,37 +37,8 @@ jobs:
             dist/*.blockmap
             dist/latest.yml
 
-      - name: Clean up stale release assets
-        if: startsWith(github.ref, 'refs/tags/v') && steps.package.outcome == 'success'
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $repo = $env:GITHUB_REPOSITORY
-          $tag = $env:GITHUB_REF_NAME
-          $base = "https://api.github.com/repos/$repo"
-          $token = $env:GH_TOKEN
-          $log = ""
-          $userCode = curl.exe -s -o NUL -w "%{http_code}" -H "Authorization: Bearer $token" -H "User-Agent: albumforge-ci" "https://api.github.com/user"
-          $log += "token check (/user): HTTP $userCode`n"
-          $json = curl.exe -s -H "Authorization: Bearer $token" -H "User-Agent: albumforge-ci" "$base/releases/tags/$tag"
-          $rel = $json | ConvertFrom-Json
-          if (-not $rel.id) {
-            $log += "release not found for $tag`n"
-          } else {
-            foreach ($a in @($rel.assets)) {
-              $code = curl.exe -s -o NUL -w "%{http_code}" -X DELETE -H "Authorization: Bearer $token" -H "User-Agent: albumforge-ci" "$base/releases/assets/$($a.id)"
-              $log += "deleted $($a.name) (id=$($a.id)): HTTP $code`n"
-            }
-            $after = (curl.exe -s -H "Authorization: Bearer $token" -H "User-Agent: albumforge-ci" "$base/releases/tags/$tag" | ConvertFrom-Json).assets
-            $log += "remaining: " + (($after | ForEach-Object { $_.name }) -join ", ") + "`n"
-            $body = @{ body = "release $tag cleanup log: $log" } | ConvertTo-Json -Compress
-            curl.exe -s -o NUL -X PATCH -H "Authorization: Bearer $token" -H "User-Agent: albumforge-ci" -H "Content-Type: application/json" -d "$body" "$base/releases/$($rel.id)"
-          }
-          Write-Output $log
-
       - name: Publish installer to release
-        if: startsWith(github.ref, 'refs/tags/v') && steps.package.outcome == 'success'
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: |
