@@ -33,6 +33,7 @@ export interface PageStyle {
   gutter: number; // normalized gap between slots
   bleed: number; // normalized bleed beyond trim (export)
   safeArea: number; // normalized inset considered safe
+  background?: string; // default page background color (hex)
 }
 
 export interface AlbumSpec {

@@ -64,6 +64,7 @@ export function familyFor(db: DB, templateId: string): TemplateFamily {
     gutter: (style.gutter as number) ?? 0.03,
     bleed: (style.bleed as number) ?? 0,
     safeArea: (style.safeArea as number) ?? 0.05,
+    background: (style.background as string) ?? "#ffffff",
   };
   return {
     key: t.key as string,
@@ -82,6 +83,7 @@ export function persistAlbum(
   pageSize: PageSize,
   variation: number,
   result: ReturnType<typeof generateAlbum>,
+  background = "#ffffff",
 ): string {
   const albumId = newId();
   db.prepare(
@@ -99,7 +101,7 @@ export function persistAlbum(
   );
 
   const insertPage = db.prepare(
-    "INSERT INTO album_pages (id, album_id, idx, layout_key) VALUES (?, ?, ?, ?)",
+    "INSERT INTO album_pages (id, album_id, idx, layout_key, background) VALUES (?, ?, ?, ?, ?)",
   );
   const insertElement = db.prepare(
     `INSERT INTO album_elements
@@ -110,7 +112,7 @@ export function persistAlbum(
   for (let i = 0; i < result.pages.length; i++) {
     const page = result.pages[i];
     const pageId = newId();
-    insertPage.run(pageId, albumId, i, page.layoutKey);
+    insertPage.run(pageId, albumId, i, page.layoutKey, JSON.stringify({ color: background }));
     for (const el of page.elements) {
       insertElement.run(
         newId(),
@@ -144,7 +146,16 @@ export function generateAndPersist(db: DB, input: GenerateInput): string[] {
   for (let v = 1; v <= input.variations; v++) {
     const result = generateAlbum(selected, family, spec, v);
     albumIds.push(
-      persistAlbum(db, input.projectId, input.templateId, `${family.name} v${v}`, input.pageSize, v, result),
+      persistAlbum(
+        db,
+        input.projectId,
+        input.templateId,
+        `${family.name} v${v}`,
+        input.pageSize,
+        v,
+        result,
+        family.style.background ?? "#ffffff",
+      ),
     );
   }
   return albumIds;

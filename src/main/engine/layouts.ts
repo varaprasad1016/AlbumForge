@@ -156,6 +156,53 @@ register({
   slots: grid(3, 3, 0.02, 0.03, 0.96, 0.94, 0.03),
 });
 
+register({
+  key: "hero_top",
+  name: "Hero top",
+  weight: 1.0,
+  slots: [
+    { x: 0.02, y: 0.03, w: 0.96, h: 0.62, orientationHint: "any", bleed: false },
+    { x: 0.02, y: 0.69, w: 0.46, h: 0.28, orientationHint: "landscape", bleed: false },
+    { x: 0.52, y: 0.69, w: 0.46, h: 0.28, orientationHint: "landscape", bleed: false },
+  ],
+});
+
+register({
+  key: "hero_bottom",
+  name: "Hero bottom",
+  weight: 1.0,
+  slots: [
+    { x: 0.02, y: 0.03, w: 0.46, h: 0.28, orientationHint: "landscape", bleed: false },
+    { x: 0.52, y: 0.03, w: 0.46, h: 0.28, orientationHint: "landscape", bleed: false },
+    { x: 0.02, y: 0.35, w: 0.96, h: 0.62, orientationHint: "any", bleed: false },
+  ],
+});
+
+register({
+  key: "centerpiece",
+  name: "Centerpiece",
+  weight: 0.8,
+  slots: [
+    { x: 0.3, y: 0.3, w: 0.4, h: 0.4, orientationHint: "any", bleed: false },
+    { x: 0.03, y: 0.03, w: 0.23, h: 0.23, orientationHint: "square", bleed: false },
+    { x: 0.74, y: 0.03, w: 0.23, h: 0.23, orientationHint: "square", bleed: false },
+    { x: 0.03, y: 0.74, w: 0.23, h: 0.23, orientationHint: "square", bleed: false },
+    { x: 0.74, y: 0.74, w: 0.23, h: 0.23, orientationHint: "square", bleed: false },
+  ],
+});
+
+register({
+  key: "big_three",
+  name: "Big + three",
+  weight: 0.9,
+  slots: [
+    { x: 0.02, y: 0.03, w: 0.6, h: 0.94, orientationHint: "any", bleed: false },
+    { x: 0.66, y: 0.03, w: 0.32, h: 0.45, orientationHint: "landscape", bleed: false },
+    { x: 0.66, y: 0.52, w: 0.32, h: 0.21, orientationHint: "landscape", bleed: false },
+    { x: 0.66, y: 0.77, w: 0.32, h: 0.2, orientationHint: "landscape", bleed: false },
+  ],
+});
+
 export function layoutKeys(): string[] {
   return Object.keys(LAYOUT_CATALOG);
 }
