@@ -70,6 +70,12 @@ export default function AlbumEditor({
   const trRef = useRef<Konva.Transformer>(null);
   const nodeRefs = useRef<Record<string, Konva.Group | null>>({});
 
+  // Keep local page state in sync with the prop (pages load asynchronously after mount,
+  // and structural changes update the parent list).
+  useEffect(() => {
+    setPagesState(pages);
+  }, [pages]);
+
   const page = pagesState[pageIndex];
   const elements = page?.elements ?? [];
   const selected = elements.find((e) => e.id === selectedId);
