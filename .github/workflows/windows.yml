@@ -54,6 +54,23 @@ jobs:
             dist/*.blockmap
             dist/latest.yml
 
+      - name: Clean up stale release assets
+        if: startsWith(github.ref, 'refs/tags/v') && steps.package.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $repo = $env:GITHUB_REPOSITORY
+          $tag = $env:GITHUB_REF_NAME
+          $h = @{ Authorization = "Bearer $env:GH_TOKEN"; "User-Agent" = "albumforge-ci" }
+          try {
+            $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/tags/$tag" -Headers $h
+            foreach ($a in $rel.assets) {
+              Invoke-RestMethod -Method Delete -Uri "https://api.github.com/repos/$repo/releases/assets/$($a.id)" -Headers $h
+            }
+          } catch {
+            Write-Output "No existing release to clean: $($_.Exception.Message)"
+          }
+
       - name: Publish installer to release
         if: startsWith(github.ref, 'refs/tags/v') && steps.package.outcome == 'success'
         uses: softprops/action-gh-release@v2

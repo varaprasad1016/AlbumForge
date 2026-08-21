@@ -27,6 +27,9 @@ win:
 nsis:
   oneClick: true
   createDesktopShortcut: true
+  # Fixed dash-separated name so the asset matches the url in latest.yml
+  # (electron-updater looks up the file by that exact name).
+  artifactName: ${productName}-Setup-${version}.${ext}
 mac:
   category: public.app-category.photography
   target:
