@@ -56,7 +56,12 @@ export default function SettingsPage() {
     }
   }
 
-  function installUpdate() {
+  function startDownload() {
+    setUpdate((prev) => (prev.phase === "available" ? { phase: "downloading", percent: 0 } : prev));
+    void window.albumforge.downloadUpdate();
+  }
+
+  function installNow() {
     void window.albumforge.installUpdate();
   }
 
@@ -93,21 +98,16 @@ export default function SettingsPage() {
 
         <section className="card p-5">
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">Updates</h2>
-
-          <div className="flex items-center gap-2">
-            <button onClick={checkUpdates} disabled={update.phase === "checking" || update.phase === "downloading"} className="btn-secondary">
-              Check for updates
-            </button>
-            {update.phase === "ready" && (
-              <button onClick={installUpdate} className="btn-primary">
-                Restart to install v{update.version}
-              </button>
-            )}
-          </div>
+          <button
+            onClick={checkUpdates}
+            disabled={update.phase === "checking" || update.phase === "downloading"}
+            className="btn-secondary"
+          >
+            Check for updates
+          </button>
 
           <div className="mt-3 text-sm">
             {update.phase === "checking" && <p className="text-slate-500">Checking for updates…</p>}
-            {update.phase === "available" && <p className="text-slate-500">Update v{update.version} found — downloading…</p>}
             {update.phase === "downloading" && (
               <div>
                 <p className="mb-1 text-slate-500">Downloading update… {update.percent}%</p>
@@ -119,7 +119,6 @@ export default function SettingsPage() {
                 </div>
               </div>
             )}
-            {update.phase === "ready" && <p className="font-medium text-emerald-600">Update ready — restart to install.</p>}
             {update.phase === "uptodate" && <p className="text-emerald-600">You are up to date ✓</p>}
             {update.phase === "error" && <p className="text-red-600">{update.message}</p>}
           </div>
@@ -148,6 +147,52 @@ export default function SettingsPage() {
           </dl>
         </section>
       </div>
+
+      {update.phase === "available" && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-96 rounded-2xl border border-slate-200 bg-white p-5 shadow-card">
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M7 16l-4-4 4-4m10 8l4-4-4-4M14 4l-4 16" />
+                </svg>
+              </span>
+              <div>
+                <h3 className="font-semibold text-ink">Update available</h3>
+                <p className="text-sm text-slate-500">A new version (v{update.version}) is available.</p>
+              </div>
+            </div>
+            <p className="mt-3 text-sm text-slate-500">Do you want to download and install it?</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={() => setUpdate({ phase: "idle" })} className="btn-secondary">
+                Not now
+              </button>
+              <button onClick={startDownload} className="btn-primary">
+                Download &amp; install
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {update.phase === "ready" && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-96 rounded-2xl border border-slate-200 bg-white p-5 shadow-card">
+            <h3 className="font-semibold text-ink">Update downloaded</h3>
+            <p className="mt-2 text-sm text-slate-500">
+              Version v{update.version} is ready. Restart AlbumForge now to install it?
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={() => setUpdate({ phase: "idle" })} className="btn-secondary">
+                Later
+              </button>
+              <button onClick={installNow} className="btn-primary">
+                Restart now
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

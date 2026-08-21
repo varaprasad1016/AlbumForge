@@ -7,6 +7,7 @@ const api: AlbumForgeApi = {
   clearCache: () => ipcRenderer.invoke("app:clearCache"),
   openDataFolder: () => ipcRenderer.invoke("app:openDataFolder"),
   checkForUpdates: () => ipcRenderer.invoke("app:checkForUpdates"),
+  downloadUpdate: () => ipcRenderer.invoke("app:downloadUpdate"),
   installUpdate: () => ipcRenderer.invoke("app:installUpdate"),
   onUpdateEvent: (cb) => {
     const listener = (_e: unknown, ev: UpdateEvent) => cb(ev);

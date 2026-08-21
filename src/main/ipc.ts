@@ -117,9 +117,10 @@ function templateSummaryDto(row: Record<string, unknown>): TemplateSummary {
 export function registerIpc(ctx: IpcContext): void {
   const { db, cacheDir, dataDir, getWindow } = ctx;
 
-  // Auto-update lifecycle → renderer events.
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  // Auto-update lifecycle → renderer events. We do NOT auto-download: the renderer asks
+  // the user first, then triggers downloadUpdate() explicitly.
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
   const send = (ev: unknown) => getWindow()?.webContents.send("update:event", ev);
   autoUpdater.on("checking-for-update", () => send({ type: "checking" }));
   autoUpdater.on("update-available", (info) => send({ type: "available", version: info.version }));
@@ -156,6 +157,10 @@ export function registerIpc(ctx: IpcContext): void {
     } catch (e) {
       return `Update check failed: ${String(e)}`;
     }
+  });
+
+  ipcMain.handle("app:downloadUpdate", () => {
+    autoUpdater.downloadUpdate().catch(() => {});
   });
 
   ipcMain.handle("app:installUpdate", () => {

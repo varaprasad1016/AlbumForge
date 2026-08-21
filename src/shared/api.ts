@@ -202,6 +202,7 @@ export interface AlbumForgeApi {
   clearCache(): Promise<void>;
   openDataFolder(): Promise<void>;
   checkForUpdates(): Promise<string>;
+  downloadUpdate(): Promise<void>;
   installUpdate(): Promise<void>;
   onUpdateEvent(cb: (e: UpdateEvent) => void): () => void;
   dialogs: {
