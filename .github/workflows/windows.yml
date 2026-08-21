@@ -63,16 +63,25 @@ jobs:
           $repo = $env:GITHUB_REPOSITORY
           $tag = $env:GITHUB_REF_NAME
           $base = "https://api.github.com/repos/$repo"
-          $json = curl.exe -s -H "Authorization: Bearer $env:GH_TOKEN" -H "User-Agent: albumforge-ci" "$base/releases/tags/$tag"
+          $token = $env:GH_TOKEN
+          $log = ""
+          $userCode = curl.exe -s -o NUL -w "%{http_code}" -H "Authorization: Bearer $token" -H "User-Agent: albumforge-ci" "https://api.github.com/user"
+          $log += "token check (/user): HTTP $userCode`n"
+          $json = curl.exe -s -H "Authorization: Bearer $token" -H "User-Agent: albumforge-ci" "$base/releases/tags/$tag"
           $rel = $json | ConvertFrom-Json
-          if (-not $rel.id) { Write-Output "No existing release for $tag"; exit 0 }
-          if (-not $rel.assets) { Write-Output "No assets to clean"; exit 0 }
-          foreach ($a in @($rel.assets)) {
-            Write-Output "Deleting asset $($a.name) (id=$($a.id))"
-            curl.exe -s -X DELETE -H "Authorization: Bearer $env:GH_TOKEN" -H "User-Agent: albumforge-ci" -o NUL -w "%{http_code}" "$base/releases/assets/$($a.id)"
-            Write-Output ""
-            if ($LASTEXITCODE -ne 0) { Write-Error "Failed to delete asset $($a.id)"; exit 1 }
+          if (-not $rel.id) {
+            $log += "release not found for $tag`n"
+          } else {
+            foreach ($a in @($rel.assets)) {
+              $code = curl.exe -s -o NUL -w "%{http_code}" -X DELETE -H "Authorization: Bearer $token" -H "User-Agent: albumforge-ci" "$base/releases/assets/$($a.id)"
+              $log += "deleted $($a.name) (id=$($a.id)): HTTP $code`n"
+            }
+            $after = (curl.exe -s -H "Authorization: Bearer $token" -H "User-Agent: albumforge-ci" "$base/releases/tags/$tag" | ConvertFrom-Json).assets
+            $log += "remaining: " + (($after | ForEach-Object { $_.name }) -join ", ") + "`n"
+            $body = @{ body = "release $tag cleanup log: $log" } | ConvertTo-Json -Compress
+            curl.exe -s -o NUL -X PATCH -H "Authorization: Bearer $token" -H "User-Agent: albumforge-ci" -H "Content-Type: application/json" -d "$body" "$base/releases/$($rel.id)"
           }
+          Write-Output $log
 
       - name: Publish installer to release
         if: startsWith(github.ref, 'refs/tags/v') && steps.package.outcome == 'success'
