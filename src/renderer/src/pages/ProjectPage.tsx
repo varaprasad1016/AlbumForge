@@ -101,6 +101,10 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
     await loadPhotos(true);
   }
 
+  async function setThumbnail(photoId: string) {
+    await window.albumforge.projects.setThumbnail(projectId, photoId);
+  }
+
   async function handleImport() {
     const paths = await window.albumforge.dialogs.chooseImages();
     if (!paths || paths.length === 0) return;
@@ -198,6 +202,11 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {selected.size === 1 && (
+            <button onClick={() => setThumbnail([...selected][0])} className="btn-secondary !text-amber-600 hover:!bg-amber-50">
+              ★ Set as thumbnail
+            </button>
+          )}
           {selected.size > 0 && (
             <button onClick={deleteSelected} className="btn-secondary !text-red-600 hover:!bg-red-50">
               Delete selected ({selected.size})
@@ -265,6 +274,7 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
           selected={selected}
           onToggle={togglePhoto}
           onDelete={deletePhoto}
+          onSetThumbnail={setThumbnail}
           onLoadMore={() => loadPhotos(false)}
           hasMore={hasMore}
         />

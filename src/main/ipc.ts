@@ -68,6 +68,7 @@ function projectDto(row: Record<string, unknown>): Project {
     clientName: row.client_name as string | null,
     eventDate: row.event_date as string | null,
     status: row.status as string,
+    thumbnailPhotoId: (row.thumbnail_photo_id as string) ?? null,
     createdAt: row.created_at as string,
   };
 }
@@ -190,8 +191,20 @@ export function registerIpc(ctx: IpcContext): void {
 
   // ---- Projects ------------------------------------------------------------
   ipcMain.handle("projects:list", () => {
-    const rows = db.prepare("SELECT * FROM projects ORDER BY created_at DESC").all();
-    return (rows as Array<Record<string, unknown>>).map(projectDto);
+    const rows = db.prepare("SELECT * FROM projects ORDER BY created_at DESC").all() as Array<
+      Record<string, unknown>
+    >;
+    const randomPhoto = db.prepare(
+      "SELECT id FROM photos WHERE project_id = ? ORDER BY RANDOM() LIMIT 1",
+    );
+    return rows.map((r) => {
+      let thumb: string | null = (r.thumbnail_photo_id as string) ?? null;
+      if (!thumb) {
+        const p = randomPhoto.get(r.id) as { id: string } | undefined;
+        thumb = p?.id ?? null;
+      }
+      return { ...projectDto(r), thumbnailPhotoId: thumb };
+    });
   });
 
   ipcMain.handle("projects:create", (_e, input: { name: string; clientName?: string; eventDate?: string }) => {
@@ -211,6 +224,10 @@ export function registerIpc(ctx: IpcContext): void {
     db.prepare("DELETE FROM photos WHERE project_id = ?").run(id);
     db.prepare("DELETE FROM albums WHERE project_id = ?").run(id);
     db.prepare("DELETE FROM projects WHERE id = ?").run(id);
+  });
+
+  ipcMain.handle("projects:setThumbnail", (_e, projectId: string, photoId: string) => {
+    db.prepare("UPDATE projects SET thumbnail_photo_id = ? WHERE id = ?").run(photoId, projectId);
   });
 
   // ---- Photos --------------------------------------------------------------

@@ -11,6 +11,7 @@ interface CellData {
   selected: Set<string>;
   onToggle: (id: string) => void;
   onDelete?: (id: string) => void;
+  onSetThumbnail?: (id: string) => void;
 }
 
 function PhotoCell({
@@ -62,6 +63,18 @@ function PhotoCell({
             ✕
           </button>
         )}
+        {data.onSetThumbnail && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              data.onSetThumbnail!(photo.id);
+            }}
+            title="Set as project thumbnail"
+            className="absolute bottom-1 right-1 flex h-6 w-6 items-center justify-center rounded-md bg-white/90 text-sm text-amber-500 opacity-0 shadow-sm transition-opacity hover:bg-amber-500 hover:text-white group-hover:opacity-100"
+          >
+            ★
+          </button>
+        )}
       </div>
     </div>
   );
@@ -72,6 +85,7 @@ export default function PhotoGallery({
   selected,
   onToggle,
   onDelete,
+  onSetThumbnail,
   onLoadMore,
   hasMore,
 }: {
@@ -79,6 +93,7 @@ export default function PhotoGallery({
   selected: Set<string>;
   onToggle: (id: string) => void;
   onDelete?: (id: string) => void;
+  onSetThumbnail?: (id: string) => void;
   onLoadMore: () => void;
   hasMore: boolean;
 }) {
@@ -103,7 +118,7 @@ export default function PhotoGallery({
     [hasMore, onLoadMore],
   );
 
-  const itemData: CellData = { photos, columnCount, selected, onToggle, onDelete };
+  const itemData: CellData = { photos, columnCount, selected, onToggle, onDelete, onSetThumbnail };
 
   return (
     <div ref={containerRef} className="h-[70vh]">

@@ -23,6 +23,7 @@ const api: AlbumForgeApi = {
     create: (input) => ipcRenderer.invoke("projects:create", input),
     get: (id) => ipcRenderer.invoke("projects:get", id),
     remove: (id) => ipcRenderer.invoke("projects:remove", id),
+    setThumbnail: (projectId, photoId) => ipcRenderer.invoke("projects:setThumbnail", projectId, photoId),
   },
   photos: {
     importPhotos: (projectId, paths) => ipcRenderer.invoke("photos:import", projectId, paths),

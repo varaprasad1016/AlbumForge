@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS projects (
   client_name TEXT,
   event_date TEXT,
   status TEXT NOT NULL DEFAULT 'active',
+  thumbnail_photo_id TEXT,
   created_at TEXT NOT NULL
 );
 
@@ -154,5 +155,13 @@ export function initDatabase(dbPath: string): DB {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(SCHEMA);
+  migrate(db);
   return db;
+}
+
+function migrate(db: DB): void {
+  const cols = db.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === "thumbnail_photo_id")) {
+    db.exec("ALTER TABLE projects ADD COLUMN thumbnail_photo_id TEXT");
+  }
 }

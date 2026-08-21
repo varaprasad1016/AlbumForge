@@ -12,6 +12,7 @@ export interface Project {
   clientName: string | null;
   eventDate: string | null;
   status: string;
+  thumbnailPhotoId: string | null;
   createdAt: string;
 }
 
@@ -214,6 +215,7 @@ export interface AlbumForgeApi {
     create(input: { name: string; clientName?: string; eventDate?: string }): Promise<Project>;
     get(id: string): Promise<Project>;
     remove(id: string): Promise<void>;
+    setThumbnail(projectId: string, photoId: string): Promise<void>;
   };
   photos: {
     importPhotos(projectId: string, paths: string[]): Promise<ImportResult>;

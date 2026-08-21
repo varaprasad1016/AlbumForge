@@ -96,16 +96,25 @@ export default function ProjectsPage() {
               <li key={p.id} className="group relative">
                 <a
                   href={`#/projects/${p.id}`}
-                  className="card block p-5 transition-all hover:-translate-y-0.5 hover:shadow-md"
+                  className="card block overflow-hidden transition-all hover:-translate-y-0.5 hover:shadow-md"
                 >
-                  <div className="flex items-center gap-3">
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-100 to-violet-100 text-sm font-bold text-indigo-600">
-                      {p.name.charAt(0).toUpperCase()}
-                    </span>
-                    <div className="min-w-0">
-                      <div className="truncate font-semibold text-ink group-hover:text-brand">{p.name}</div>
-                      {p.clientName && <div className="truncate text-sm text-slate-400">{p.clientName}</div>}
-                    </div>
+                  <div className="aspect-[4/3] w-full bg-slate-100">
+                    {p.thumbnailPhotoId ? (
+                      <img
+                        src={`media://thumb256/${p.thumbnailPhotoId}`}
+                        alt={p.name}
+                        draggable={false}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-indigo-100 to-violet-100 text-3xl font-bold text-indigo-400">
+                        {p.name.charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-4">
+                    <div className="truncate font-semibold text-ink group-hover:text-brand">{p.name}</div>
+                    {p.clientName && <div className="truncate text-sm text-slate-400">{p.clientName}</div>}
                   </div>
                 </a>
                 <button
