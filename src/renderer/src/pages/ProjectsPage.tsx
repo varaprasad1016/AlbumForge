@@ -98,18 +98,20 @@ export default function ProjectsPage() {
                   href={`#/projects/${p.id}`}
                   className="card block overflow-hidden transition-all hover:-translate-y-0.5 hover:shadow-md"
                 >
-                  <div className="aspect-[4/3] w-full bg-slate-100">
-                    {p.thumbnailPhotoId ? (
+                  <div className="relative aspect-[4/3] w-full bg-slate-100">
+                    <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-indigo-100 to-violet-100 text-3xl font-bold text-indigo-400">
+                      {p.name.charAt(0).toUpperCase()}
+                    </div>
+                    {p.thumbnailPhotoId && (
                       <img
-                        src={`media://thumb256/${p.thumbnailPhotoId}`}
+                        src={`media://preview1024/${p.thumbnailPhotoId}`}
                         alt={p.name}
                         draggable={false}
-                        className="h-full w-full object-cover"
+                        className="absolute inset-0 h-full w-full object-cover"
+                        onError={(e) => {
+                          e.currentTarget.style.display = "none";
+                        }}
                       />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-indigo-100 to-violet-100 text-3xl font-bold text-indigo-400">
-                        {p.name.charAt(0).toUpperCase()}
-                      </div>
                     )}
                   </div>
                   <div className="p-4">

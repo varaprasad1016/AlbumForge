@@ -129,9 +129,11 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
 
   async function handleGenerate() {
     const sizeMap: Record<string, { width: number; height: number; unit: "mm" | "in" }> = {
+      "12x18": { width: 18, height: 12, unit: "in" },
+      "12x15": { width: 15, height: 12, unit: "in" },
       "12x12": { width: 12, height: 12, unit: "in" },
-      "10x10": { width: 10, height: 10, unit: "in" },
-      A4: { width: 210, height: 297, unit: "mm" },
+      "10x15": { width: 15, height: 10, unit: "in" },
+      "10x12": { width: 12, height: 10, unit: "in" },
     };
     setGenerating(true);
     setGenError("");
@@ -336,9 +338,11 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
               <div>
                 <label className="field-label">Size</label>
                 <select value={pageSize} onChange={(e) => setPageSize(e.target.value)} className="input">
-                  <option value="12x12">12×12 in</option>
-                  <option value="10x10">10×10 in</option>
-                  <option value="A4">A4</option>
+                  <option value="12x18">12×18 in (12×36 open)</option>
+                  <option value="12x15">12×15 in (12×30 open)</option>
+                  <option value="12x12">12×12 in (12×24 open)</option>
+                  <option value="10x15">10×15 in (10×30 open)</option>
+                  <option value="10x12">10×12 in (10×24 open)</option>
                 </select>
               </div>
               <div>

@@ -194,14 +194,23 @@ export function registerIpc(ctx: IpcContext): void {
     const rows = db.prepare("SELECT * FROM projects ORDER BY created_at DESC").all() as Array<
       Record<string, unknown>
     >;
-    const randomPhoto = db.prepare(
-      "SELECT id FROM photos WHERE project_id = ? ORDER BY RANDOM() LIMIT 1",
+    const photoExists = db.prepare("SELECT 1 FROM photos WHERE id = ? LIMIT 1");
+    const bestPhoto = db.prepare(
+      "SELECT id FROM photos WHERE project_id = ? AND quality_score IS NOT NULL ORDER BY quality_score DESC, id ASC LIMIT 1",
     );
+    const anyPhoto = db.prepare("SELECT id FROM photos WHERE project_id = ? ORDER BY id ASC LIMIT 1");
+    const pinThumb = db.prepare("UPDATE projects SET thumbnail_photo_id = ? WHERE id = ?");
+    const clearThumb = db.prepare("UPDATE projects SET thumbnail_photo_id = NULL WHERE id = ?");
     return rows.map((r) => {
       let thumb: string | null = (r.thumbnail_photo_id as string) ?? null;
+      if (thumb && !photoExists.get(thumb)) {
+        thumb = null;
+        clearThumb.run(r.id);
+      }
       if (!thumb) {
-        const p = randomPhoto.get(r.id) as { id: string } | undefined;
+        const p = (bestPhoto.get(r.id) ?? anyPhoto.get(r.id)) as { id: string } | undefined;
         thumb = p?.id ?? null;
+        if (thumb) pinThumb.run(thumb, r.id);
       }
       return { ...projectDto(r), thumbnailPhotoId: thumb };
     });
@@ -316,6 +325,7 @@ export function registerIpc(ctx: IpcContext): void {
   });
 
   ipcMain.handle("photos:remove", (_e, photoId: string) => {
+    db.prepare("UPDATE projects SET thumbnail_photo_id = NULL WHERE thumbnail_photo_id = ?").run(photoId);
     db.prepare("DELETE FROM photos WHERE id = ?").run(photoId);
   });
 
