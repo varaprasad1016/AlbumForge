@@ -12,6 +12,7 @@ import {
 import type Konva from "konva";
 import type { AlbumElement, AlbumPage, PageSize } from "@shared/api";
 import PhotoPicker from "./PhotoPicker";
+import PromptModal from "./PromptModal";
 
 const PAGE_W = 600;
 
@@ -44,6 +45,7 @@ export default function AlbumEditor({
   pageSize,
   layouts = [],
   onPageUpdated,
+  onPagesChanged,
 }: {
   albumId: string;
   projectId: string;
@@ -51,6 +53,7 @@ export default function AlbumEditor({
   pageSize: PageSize;
   layouts?: LayoutOption[];
   onPageUpdated: (page: AlbumPage) => void;
+  onPagesChanged: (pages: AlbumPage[]) => void;
 }) {
   const aspect = pageSize.width / pageSize.height;
   const PAGE_H = PAGE_W / aspect;
@@ -62,11 +65,10 @@ export default function AlbumEditor({
   const [future, setFuture] = useState<AlbumPage[][]>([]);
   const [saving, setSaving] = useState(false);
   const [picker, setPicker] = useState<"add" | "replace" | null>(null);
+  const [prompt, setPrompt] = useState<{ title: string; initial: string; onConfirm: (v: string) => void } | null>(null);
 
   const trRef = useRef<Konva.Transformer>(null);
   const nodeRefs = useRef<Record<string, Konva.Group | null>>({});
-
-  useEffect(() => setPagesState(pages), [pages]);
 
   const page = pagesState[pageIndex];
   const elements = page?.elements ?? [];
@@ -209,6 +211,34 @@ export default function AlbumEditor({
     void persist(pagesState.map((x) => (x.id === p.id ? p : x)));
   }
 
+  async function addPage() {
+    const newPage = await window.albumforge.albums.addPage(albumId);
+    const next = [...pagesState, newPage];
+    setPagesState(next);
+    onPagesChanged(next);
+    setPageIndex(next.length - 1);
+  }
+
+  async function duplicatePage() {
+    if (!page) return;
+    const dup = await window.albumforge.albums.duplicatePage(albumId, page.id);
+    const next = [...pagesState, dup];
+    setPagesState(next);
+    onPagesChanged(next);
+    setPageIndex(next.length - 1);
+  }
+
+  async function deletePage() {
+    if (!page) return;
+    if (!window.confirm(`Delete page ${pageIndex + 1}?`)) return;
+    await window.albumforge.albums.deletePage(albumId, page.id);
+    const next = pagesState.filter((p) => p.id !== page.id).map((p, i) => ({ ...p, index: i }));
+    setPagesState(next);
+    onPagesChanged(next);
+    setSelectedId(null);
+    setPageIndex((i) => Math.min(i, Math.max(0, next.length - 1)));
+  }
+
   const onTransformEnd = useCallback(
     (el: { id: string }) => (e: Konva.KonvaEventObject<Event>) => {
       const node = e.target as Konva.Group;
@@ -242,6 +272,30 @@ export default function AlbumEditor({
     }
   }, [selectedId, elements, pageIndex]);
 
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const t = e.target as HTMLElement | null;
+      const editing =
+        !!t &&
+        (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
+      if (editing) return;
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+      } else if (mod && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        redo();
+      } else if ((e.key === "Delete" || e.key === "Backspace") && selectedId) {
+        e.preventDefault();
+        deleteSelected();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
   if (!page) return null;
 
   const safeInset = PAGE_W * 0.05;
@@ -249,21 +303,30 @@ export default function AlbumEditor({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
-        <button onClick={() => setPageIndex((i) => Math.max(0, i - 1))} className="rounded border border-neutral-300 px-3 py-1 text-sm">
+        <button onClick={() => setPageIndex((i) => Math.max(0, i - 1))} className="btn-secondary !px-3 !py-1">
           ←
         </button>
         <span className="text-sm">
           Page {pageIndex + 1} / {pagesState.length}
         </span>
-        <button onClick={() => setPageIndex((i) => Math.min(pagesState.length - 1, i + 1))} className="rounded border border-neutral-300 px-3 py-1 text-sm">
+        <button onClick={() => setPageIndex((i) => Math.min(pagesState.length - 1, i + 1))} className="btn-secondary !px-3 !py-1">
           →
+        </button>
+        <button onClick={addPage} className="btn-secondary !px-3 !py-1">
+          + Page
+        </button>
+        <button onClick={duplicatePage} className="btn-secondary !px-3 !py-1">
+          Duplicate
+        </button>
+        <button onClick={deletePage} className="btn-secondary !px-3 !py-1 !text-red-600 hover:!bg-red-50">
+          Delete page
         </button>
 
         {layouts.length > 0 && (
           <select
             value={page.layoutKey ?? ""}
             onChange={(e) => changeLayout(e.target.value)}
-            className="rounded border border-neutral-300 px-2 py-1 text-sm"
+            className="input !w-auto !px-2 !py-1 text-sm"
           >
             {layouts.map((l) => (
               <option key={l.key} value={l.key}>
@@ -273,41 +336,41 @@ export default function AlbumEditor({
           </select>
         )}
 
-        <label className="flex items-center gap-1 text-sm text-neutral-600">
+        <label className="flex items-center gap-1 text-sm text-slate-600">
           Background
           <input
             type="color"
             value={background}
             onChange={(e) => setBackground(e.target.value)}
-            className="h-6 w-8 cursor-pointer rounded border border-neutral-300"
+            className="h-6 w-8 cursor-pointer rounded border border-slate-300"
           />
         </label>
 
-        <button onClick={() => setPicker("add")} className="rounded border border-neutral-300 px-3 py-1 text-sm">
+        <button onClick={() => setPicker("add")} className="btn-secondary !px-3 !py-1">
           Add photo
         </button>
         <button
           onClick={() => setPicker("replace")}
           disabled={!selected || selected.type !== "image"}
-          className="rounded border border-neutral-300 px-3 py-1 text-sm disabled:opacity-40"
+          className="btn-secondary !px-3 !py-1"
         >
           Replace
         </button>
-        <button onClick={deleteSelected} disabled={!selected} className="rounded border border-neutral-300 px-3 py-1 text-sm disabled:opacity-40">
+        <button onClick={deleteSelected} disabled={!selected} className="btn-secondary !px-3 !py-1">
           Delete
         </button>
-        <button onClick={addText} className="rounded border border-neutral-300 px-3 py-1 text-sm">
+        <button onClick={addText} className="btn-secondary !px-3 !py-1">
           Add text
         </button>
 
         <div className="ml-auto flex gap-2">
-          <button onClick={undo} className="rounded border border-neutral-300 px-3 py-1 text-sm">
+          <button onClick={undo} className="btn-secondary !px-3 !py-1">
             Undo
           </button>
-          <button onClick={redo} className="rounded border border-neutral-300 px-3 py-1 text-sm">
+          <button onClick={redo} className="btn-secondary !px-3 !py-1">
             Redo
           </button>
-          <button onClick={() => persist(pagesState)} disabled={saving} className="rounded bg-brand px-4 py-1 text-sm font-semibold text-white">
+          <button onClick={() => persist(pagesState)} disabled={saving} className="btn-primary !px-4 !py-1">
             {saving ? "Saving…" : "Save"}
           </button>
         </div>
@@ -352,7 +415,14 @@ export default function AlbumEditor({
                 onSelect={() => setSelectedId(el.id)}
                 onDragEnd={onDragEnd(el)}
                 onTransformEnd={onTransformEnd(el)}
-                onEditText={(newText) => updateElement(el.id, { text: { content: newText } })}
+                onEditTextRequest={(el) => {
+                  const content = (el.text as { content?: string } | null)?.content ?? "";
+                  setPrompt({
+                    title: "Edit text",
+                    initial: content,
+                    onConfirm: (v) => updateElement(el.id, { text: { content: v } }),
+                  });
+                }}
               />
             ))}
             <Transformer ref={trRef} rotateEnabled anchorSize={8} />
@@ -365,6 +435,18 @@ export default function AlbumEditor({
           projectId={projectId}
           onSelect={(id) => (picker === "add" ? addPhoto(id) : replacePhoto(id))}
           onClose={() => setPicker(null)}
+        />
+      )}
+
+      {prompt && (
+        <PromptModal
+          title={prompt.title}
+          defaultValue={prompt.initial}
+          onConfirm={(v) => {
+            prompt.onConfirm(v);
+            setPrompt(null);
+          }}
+          onCancel={() => setPrompt(null)}
         />
       )}
     </div>
@@ -382,7 +464,7 @@ function ElementNode({
   onSelect,
   onDragEnd,
   onTransformEnd,
-  onEditText,
+  onEditTextRequest,
 }: {
   el: AlbumElement;
   pageX: number;
@@ -394,7 +476,7 @@ function ElementNode({
   onSelect: () => void;
   onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => void;
   onTransformEnd: (e: Konva.KonvaEventObject<Event>) => void;
-  onEditText: (text: string) => void;
+  onEditTextRequest: (el: AlbumElement) => void;
 }) {
   const x = pageX + el.x * pageW;
   const y = pageY + el.y * pageH;
@@ -413,10 +495,7 @@ function ElementNode({
         draggable
         onClick={onSelect}
         onTap={onSelect}
-        onDblClick={() => {
-          const next = window.prompt("Text", content);
-          if (next != null) onEditText(next);
-        }}
+        onDblClick={() => onEditTextRequest(el)}
         onDragEnd={onDragEnd}
         onTransformEnd={onTransformEnd}
       >

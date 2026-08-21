@@ -71,8 +71,10 @@ export default function AlbumPage({ albumId }: { albumId: string }) {
             <button
               key={t}
               onClick={() => setTab(t)}
-              className={`rounded px-3 py-1 text-sm capitalize ${
-                tab === t ? "bg-brand text-white" : "border border-neutral-300"
+              className={`rounded-lg px-4 py-1.5 text-sm font-semibold capitalize transition-colors ${
+                tab === t
+                  ? "bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-sm"
+                  : "text-slate-600 hover:bg-slate-100"
               }`}
             >
               {t}
@@ -89,25 +91,26 @@ export default function AlbumPage({ albumId }: { albumId: string }) {
           pageSize={album.pageSize}
           layouts={layouts}
           onPageUpdated={onPageUpdated}
+          onPagesChanged={setPages}
         />
       )}
 
       {tab === "versions" && (
         <div className="space-y-3">
-          <button onClick={snapshot} className="rounded bg-brand px-4 py-2 text-sm text-white">
+          <button onClick={snapshot} className="btn-primary">
             Snapshot current state
           </button>
           <ul className="space-y-2">
             {versions.map((v) => (
-              <li key={v.id} className="flex items-center gap-3 rounded border border-neutral-200 p-3">
+              <li key={v.id} className="flex items-center gap-3 rounded border border-slate-200 p-3">
                 <span className="text-sm">Version {v.versionNumber}</span>
-                <span className="text-xs text-neutral-400">{new Date(v.createdAt).toLocaleString()}</span>
-                <button onClick={() => restore(v.id)} className="ml-auto rounded border border-neutral-300 px-3 py-1 text-sm">
+                <span className="text-xs text-slate-400">{new Date(v.createdAt).toLocaleString()}</span>
+                <button onClick={() => restore(v.id)} className="btn-secondary ml-auto !px-3 !py-1">
                   Restore
                 </button>
               </li>
             ))}
-            {versions.length === 0 && <p className="text-sm text-neutral-400">No versions yet.</p>}
+            {versions.length === 0 && <p className="text-sm text-slate-400">No versions yet.</p>}
           </ul>
         </div>
       )}
@@ -115,21 +118,21 @@ export default function AlbumPage({ albumId }: { albumId: string }) {
       {tab === "export" && (
         <div className="space-y-4">
           <div className="flex gap-2">
-            <button onClick={() => doExport("proof_pdf", 150)} className="rounded border border-neutral-300 px-4 py-2 text-sm">
+            <button onClick={() => doExport("proof_pdf", 150)} className="btn-secondary">
               Proof PDF (watermarked)
             </button>
-            <button onClick={() => doExport("preview_pdf")} className="rounded border border-neutral-300 px-4 py-2 text-sm">
+            <button onClick={() => doExport("preview_pdf")} className="btn-secondary">
               Preview PDF
             </button>
-            <button onClick={() => doExport("highres_pdf")} className="rounded bg-brand px-4 py-2 text-sm text-white">
+            <button onClick={() => doExport("highres_pdf")} className="btn-primary">
               High-res PDF (300 DPI)
             </button>
           </div>
           <ul className="space-y-2">
             {exports.map((e) => (
-              <li key={e.id} className="flex items-center gap-3 rounded border border-neutral-200 p-3 text-sm">
+              <li key={e.id} className="flex items-center gap-3 rounded border border-slate-200 p-3 text-sm">
                 <span>{e.kind}</span>
-                <span className="text-neutral-400">{e.status}</span>
+                <span className="text-slate-400">{e.status}</span>
                 {e.filePath && (
                   <button onClick={() => window.albumforge.openPath(e.filePath!)} className="ml-auto text-brand">
                     Open

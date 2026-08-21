@@ -9,5 +9,35 @@ body,
 }
 
 body {
-  @apply bg-neutral-50 text-ink antialiased;
+  @apply bg-slate-50 text-ink font-sans antialiased;
+  background-image:
+    radial-gradient(1100px 500px at 0% -5%, rgba(99, 102, 241, 0.08) 0%, transparent 60%),
+    radial-gradient(900px 500px at 100% -5%, rgba(139, 92, 246, 0.07) 0%, transparent 55%);
+  background-attachment: fixed;
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-slate-200/70 bg-white shadow-card;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-150 hover:shadow-md hover:brightness-105 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition-all duration-150 hover:bg-slate-50 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 transition-colors focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100;
+  }
+
+  .field-label {
+    @apply mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500;
+  }
+
+  .tab-pill {
+    @apply rounded-lg px-3 py-1.5 text-sm font-semibold capitalize transition-colors;
+  }
 }

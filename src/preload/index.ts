@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { AlbumForgeApi, ImportProgress } from "@shared/api";
+import type { AlbumForgeApi, ImportProgress, UpdateEvent } from "@shared/api";
 
 const api: AlbumForgeApi = {
   info: () => ipcRenderer.invoke("app:info"),
@@ -7,6 +7,12 @@ const api: AlbumForgeApi = {
   clearCache: () => ipcRenderer.invoke("app:clearCache"),
   openDataFolder: () => ipcRenderer.invoke("app:openDataFolder"),
   checkForUpdates: () => ipcRenderer.invoke("app:checkForUpdates"),
+  installUpdate: () => ipcRenderer.invoke("app:installUpdate"),
+  onUpdateEvent: (cb) => {
+    const listener = (_e: unknown, ev: UpdateEvent) => cb(ev);
+    ipcRenderer.on("update:event", listener);
+    return () => ipcRenderer.removeListener("update:event", listener);
+  },
   dialogs: {
     chooseImages: () => ipcRenderer.invoke("dialogs:chooseImages"),
     chooseSavePath: (defaultName) => ipcRenderer.invoke("dialogs:chooseSavePath", defaultName),

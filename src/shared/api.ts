@@ -143,9 +143,18 @@ export interface ExportJob {
 
 export interface AppInfo {
   version: string;
+  author: string;
   dataPath: string;
   cachePath: string;
 }
+
+export type UpdateEvent =
+  | { type: "checking" }
+  | { type: "available"; version: string }
+  | { type: "not-available" }
+  | { type: "progress"; percent: number }
+  | { type: "downloaded"; version: string }
+  | { type: "error"; message: string };
 
 export interface ImportProgress {
   current: number;
@@ -193,6 +202,8 @@ export interface AlbumForgeApi {
   clearCache(): Promise<void>;
   openDataFolder(): Promise<void>;
   checkForUpdates(): Promise<string>;
+  installUpdate(): Promise<void>;
+  onUpdateEvent(cb: (e: UpdateEvent) => void): () => void;
   dialogs: {
     chooseImages(): Promise<string[] | null>;
     chooseSavePath(defaultName: string): Promise<string | null>;

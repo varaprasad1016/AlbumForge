@@ -10,6 +10,7 @@ interface CellData {
   columnCount: number;
   selected: Set<string>;
   onToggle: (id: string) => void;
+  onDelete?: (id: string) => void;
 }
 
 function PhotoCell({
@@ -33,7 +34,7 @@ function PhotoCell({
     <div style={style} className="p-1">
       <div
         onClick={() => data.onToggle(photo.id)}
-        className={`relative h-full w-full cursor-pointer overflow-hidden rounded border-2 ${
+        className={`group relative h-full w-full cursor-pointer overflow-hidden rounded border-2 ${
           selected ? "border-brand" : "border-transparent"
         }`}
       >
@@ -45,9 +46,21 @@ function PhotoCell({
           className="h-full w-full object-cover"
         />
         {selected && (
-          <div className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-brand text-xs text-white">
+          <div className="absolute left-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-brand text-xs text-white">
             ✓
           </div>
+        )}
+        {data.onDelete && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              data.onDelete!(photo.id);
+            }}
+            title="Delete photo"
+            className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-md bg-white/90 text-xs text-slate-500 opacity-0 shadow-sm transition-opacity hover:bg-red-600 hover:text-white group-hover:opacity-100"
+          >
+            ✕
+          </button>
         )}
       </div>
     </div>
@@ -58,12 +71,14 @@ export default function PhotoGallery({
   photos,
   selected,
   onToggle,
+  onDelete,
   onLoadMore,
   hasMore,
 }: {
   photos: Photo[];
   selected: Set<string>;
   onToggle: (id: string) => void;
+  onDelete?: (id: string) => void;
   onLoadMore: () => void;
   hasMore: boolean;
 }) {
@@ -88,7 +103,7 @@ export default function PhotoGallery({
     [hasMore, onLoadMore],
   );
 
-  const itemData: CellData = { photos, columnCount, selected, onToggle };
+  const itemData: CellData = { photos, columnCount, selected, onToggle, onDelete };
 
   return (
     <div ref={containerRef} className="h-[70vh]">

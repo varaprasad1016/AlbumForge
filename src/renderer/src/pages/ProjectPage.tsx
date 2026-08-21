@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import PhotoGallery from "../components/PhotoGallery";
+import PromptModal from "../components/PromptModal";
 import type { Album, ImportProgress, Photo, PhotoGroup, Project, TemplateSummary } from "@shared/api";
 
 const PAGE_LIMIT = 200;
@@ -27,6 +28,7 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState<ImportProgress | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [prompt, setPrompt] = useState<{ title: string; initial: string; onConfirm: (v: string) => void } | null>(null);
 
   const loadPhotos = useCallback(
     async (reset: boolean) => {
@@ -79,6 +81,26 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
     });
   }
 
+  async function deletePhoto(photoId: string) {
+    if (!window.confirm("Delete this photo?")) return;
+    await window.albumforge.photos.remove(photoId);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.delete(photoId);
+      return next;
+    });
+    await loadPhotos(true);
+  }
+
+  async function deleteSelected() {
+    if (!window.confirm(`Delete ${selected.size} selected photo(s)?`)) return;
+    for (const id of selected) {
+      await window.albumforge.photos.remove(id);
+    }
+    setSelected(new Set());
+    await loadPhotos(true);
+  }
+
   async function handleImport() {
     const paths = await window.albumforge.dialogs.chooseImages();
     if (!paths || paths.length === 0) return;
@@ -122,11 +144,16 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
   }
 
   async function renameGroup(g: PhotoGroup) {
-    const name = window.prompt("Group name", g.name);
-    if (name) {
-      await window.albumforge.groups.rename(g.id, name);
-      await loadGroups();
-    }
+    setPrompt({
+      title: "Rename group",
+      initial: g.name,
+      onConfirm: async (name) => {
+        if (name) {
+          await window.albumforge.groups.rename(g.id, name);
+          await loadGroups();
+        }
+      },
+    });
   }
 
   async function deleteGroup(g: PhotoGroup) {
@@ -142,11 +169,16 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
   }
 
   async function moveSelectedToNewGroup() {
-    const name = window.prompt("New group name", "New group");
-    if (!name) return;
-    const created = await window.albumforge.groups.create(projectId, name);
-    if (created) await window.albumforge.groups.assign(created.id, [...selected]);
-    await loadGroups();
+    setPrompt({
+      title: "New group name",
+      initial: "",
+      onConfirm: async (name) => {
+        if (!name) return;
+        const created = await window.albumforge.groups.create(projectId, name);
+        if (created) await window.albumforge.groups.assign(created.id, [...selected]);
+        await loadGroups();
+      },
+    });
   }
 
   async function clearGroups() {
@@ -161,50 +193,67 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">{project?.name ?? "Project"}</h1>
-          <p className="text-sm text-neutral-400">
+          <p className="text-sm text-slate-400">
             {photos.length} shown · {total} total · {selected.size} selected
           </p>
         </div>
-        <button
-          onClick={handleImport}
-          disabled={importing}
-          className="rounded bg-brand px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-        >
-          {importing ? "Importing…" : "Import photos"}
-        </button>
+        <div className="flex items-center gap-2">
+          {selected.size > 0 && (
+            <button onClick={deleteSelected} className="btn-secondary !text-red-600 hover:!bg-red-50">
+              Delete selected ({selected.size})
+            </button>
+          )}
+          <button onClick={handleImport} disabled={importing} className="btn-primary">
+            {importing ? "Importing…" : "Import photos"}
+          </button>
+        </div>
       </div>
 
       {total === 0 && !importing && (
-        <div className="mb-6 rounded-lg border border-brand/20 bg-white p-8 text-center">
-          <h2 className="text-lg font-semibold text-ink">No photos yet</h2>
-          <p className="mx-auto mt-2 max-w-lg text-sm text-neutral-500">
-            Import your finished photographs to begin. AlbumForge analyses them locally and
-            uses them to generate complete album layouts.
-          </p>
-          <button onClick={handleImport} className="mt-4 rounded bg-brand px-4 py-2 text-sm font-semibold text-white">
-            Import photos
-          </button>
+        <div className="card mb-6 overflow-hidden">
+          <div className="bg-gradient-to-br from-indigo-500 to-violet-600 p-8 text-center text-white">
+            <h2 className="text-lg font-semibold">No photos yet</h2>
+            <p className="mx-auto mt-2 max-w-lg text-sm text-indigo-100">
+              Import your finished photographs to begin. AlbumForge analyses them locally
+              and uses them to generate complete album layouts.
+            </p>
+            <button
+              onClick={handleImport}
+              className="mt-4 inline-flex items-center gap-2 rounded-lg bg-white/20 px-4 py-2 text-sm font-semibold text-white backdrop-blur transition-colors hover:bg-white/30"
+            >
+              Import photos
+            </button>
+          </div>
         </div>
       )}
 
       {importing && progress && (
-        <div className="mb-4 rounded border border-neutral-200 bg-white p-3 text-sm">
-          <div className="mb-1 flex justify-between text-neutral-600">
-            <span>{progress.filename}</span>
-            <span>
+        <div className="card mb-4 p-3 text-sm">
+          <div className="mb-1.5 flex justify-between text-slate-600">
+            <span className="truncate">{progress.filename}</span>
+            <span className="shrink-0 text-slate-400">
               {progress.current} / {progress.total}
             </span>
           </div>
-          <div className="h-1.5 w-full rounded bg-neutral-200">
-            <div className="h-1.5 rounded bg-brand" style={{ width: `${(progress.current / progress.total) * 100}%` }} />
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+            <div
+              className="h-1.5 rounded-full bg-gradient-to-r from-indigo-500 to-violet-600 transition-all"
+              style={{ width: `${(progress.current / progress.total) * 100}%` }}
+            />
           </div>
         </div>
       )}
 
       {activeGroupId && (
         <div className="mb-2 flex items-center gap-2 text-sm">
-          <span className="text-neutral-500">Filtering by group.</span>
-          <button onClick={() => { setActiveGroupId(null); void loadPhotos(true); }} className="text-brand">
+          <span className="text-slate-500">Filtering by group.</span>
+          <button
+            onClick={() => {
+              setActiveGroupId(null);
+              void loadPhotos(true);
+            }}
+            className="font-semibold text-brand hover:underline"
+          >
             Show all
           </button>
         </div>
@@ -215,17 +264,18 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
           photos={photos}
           selected={selected}
           onToggle={togglePhoto}
+          onDelete={deletePhoto}
           onLoadMore={() => loadPhotos(false)}
           hasMore={hasMore}
         />
 
         <aside className="space-y-6">
-          <section className="rounded-lg border border-neutral-200 bg-white p-4">
+          <section className="card p-4">
             <h2 className="mb-3 font-semibold">Generate albums</h2>
             <div className="space-y-3 text-sm">
               <div>
-                <label className="mb-1 block text-neutral-600">Template</label>
-                <select value={templateId} onChange={(e) => setTemplateId(e.target.value)} className="w-full rounded border border-neutral-300 px-2 py-1.5">
+                <label className="field-label">Template</label>
+                <select value={templateId} onChange={(e) => setTemplateId(e.target.value)} className="input">
                   {templates.map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.name}
@@ -235,35 +285,35 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="mb-1 block text-neutral-600">Size</label>
-                  <select value={pageSize} onChange={(e) => setPageSize(e.target.value)} className="w-full rounded border border-neutral-300 px-2 py-1.5">
+                  <label className="field-label">Size</label>
+                  <select value={pageSize} onChange={(e) => setPageSize(e.target.value)} className="input">
                     <option value="12x12">12×12 in</option>
                     <option value="10x10">10×10 in</option>
                     <option value="A4">A4</option>
                   </select>
                 </div>
                 <div>
-                  <label className="mb-1 block text-neutral-600">Pages</label>
+                  <label className="field-label">Pages</label>
                   <input
                     type="number"
                     value={pageCount}
                     min={1}
                     onChange={(e) => setPageCount(Number(e.target.value))}
-                    className="w-full rounded border border-neutral-300 px-2 py-1.5"
+                    className="input"
                   />
                 </div>
               </div>
               <div>
-                <label className="mb-1 block text-neutral-600">Photo selection</label>
-                <select value={selection} onChange={(e) => setSelection(e.target.value as "all" | "selected" | "ai")} className="w-full rounded border border-neutral-300 px-2 py-1.5">
+                <label className="field-label">Photo selection</label>
+                <select value={selection} onChange={(e) => setSelection(e.target.value as "all" | "selected" | "ai")} className="input">
                   <option value="all">All photos</option>
                   <option value="selected">Selected photos</option>
                   <option value="ai">AI-selected</option>
                 </select>
               </div>
               <div>
-                <label className="mb-1 block text-neutral-600">Variations</label>
-                <select value={variations} onChange={(e) => setVariations(Number(e.target.value))} className="w-full rounded border border-neutral-300 px-2 py-1.5">
+                <label className="field-label">Variations</label>
+                <select value={variations} onChange={(e) => setVariations(Number(e.target.value))} className="input">
                   {[1, 2, 3, 5].map((n) => (
                     <option key={n} value={n}>
                       {n}
@@ -271,20 +321,20 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
                   ))}
                 </select>
               </div>
-              <button onClick={handleGenerate} disabled={generating} className="w-full rounded bg-brand py-2 font-semibold text-white disabled:opacity-50">
+              <button onClick={handleGenerate} disabled={generating} className="btn-primary w-full">
                 {generating ? "Generating…" : "Generate albums"}
               </button>
             </div>
           </section>
 
-          <section className="rounded-lg border border-neutral-200 bg-white p-4">
+          <section className="card p-4">
             <div className="mb-2 flex items-center justify-between">
               <h2 className="font-semibold">Groups</h2>
               <div className="flex gap-1">
-                <button onClick={autoGroup} className="rounded border border-neutral-300 px-2 py-1 text-xs">
+                <button onClick={autoGroup} className="btn-secondary !px-2.5 !py-1 text-xs">
                   Auto-group
                 </button>
-                <button onClick={clearGroups} className="rounded border border-neutral-300 px-2 py-1 text-xs">
+                <button onClick={clearGroups} className="btn-secondary !px-2.5 !py-1 text-xs">
                   Clear
                 </button>
               </div>
@@ -292,8 +342,13 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
             <ul className="space-y-1 text-sm">
               <li>
                 <button
-                  onClick={() => { setActiveGroupId(null); void loadPhotos(true); }}
-                  className={`w-full rounded px-2 py-1 text-left ${activeGroupId === null ? "bg-brand/10 font-semibold" : "hover:bg-neutral-100"}`}
+                  onClick={() => {
+                    setActiveGroupId(null);
+                    void loadPhotos(true);
+                  }}
+                  className={`w-full rounded-lg px-2.5 py-1.5 text-left transition-colors ${
+                    activeGroupId === null ? "bg-indigo-50 font-semibold text-brand" : "hover:bg-slate-50"
+                  }`}
                 >
                   All photos ({total})
                 </button>
@@ -301,49 +356,73 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
               {groups.map((g) => (
                 <li key={g.id} className="flex items-center">
                   <button
-                    onClick={() => { setActiveGroupId(g.id); void loadPhotos(true); }}
-                    className={`flex-1 rounded px-2 py-1 text-left ${activeGroupId === g.id ? "bg-brand/10 font-semibold" : "hover:bg-neutral-100"}`}
+                    onClick={() => {
+                      setActiveGroupId(g.id);
+                      void loadPhotos(true);
+                    }}
+                    className={`flex-1 rounded-lg px-2.5 py-1.5 text-left transition-colors ${
+                      activeGroupId === g.id ? "bg-indigo-50 font-semibold text-brand" : "hover:bg-slate-50"
+                    }`}
                   >
                     {g.name} ({g.photoCount})
                   </button>
-                  <button onClick={() => renameGroup(g)} className="px-1 text-neutral-400 hover:text-neutral-700" title="Rename">
+                  <button onClick={() => renameGroup(g)} className="px-1.5 text-slate-400 hover:text-slate-700" title="Rename">
                     ✎
                   </button>
-                  <button onClick={() => deleteGroup(g)} className="px-1 text-neutral-400 hover:text-red-600" title="Delete">
+                  <button onClick={() => deleteGroup(g)} className="px-1.5 text-slate-400 hover:text-red-600" title="Delete">
                     ✕
                   </button>
                 </li>
               ))}
-              {groups.length === 0 && <li className="text-neutral-400">No groups.</li>}
+              {groups.length === 0 && <li className="px-2.5 py-1 text-slate-400">No groups.</li>}
             </ul>
             {selected.size > 0 && (
-              <div className="mt-3 space-y-1 border-t border-neutral-100 pt-2">
-                <p className="text-xs text-neutral-500">{selected.size} photo(s) selected</p>
-                <button onClick={() => activeGroupId && assignSelectedToGroup(activeGroupId)} disabled={!activeGroupId} className="w-full rounded border border-neutral-300 px-2 py-1 text-xs disabled:opacity-40">
+              <div className="mt-3 space-y-1.5 border-t border-slate-100 pt-3">
+                <p className="text-xs text-slate-500">{selected.size} photo(s) selected</p>
+                <button
+                  onClick={() => activeGroupId && assignSelectedToGroup(activeGroupId)}
+                  disabled={!activeGroupId}
+                  className="btn-secondary w-full !px-2.5 !py-1.5 text-xs"
+                >
                   Assign to this group
                 </button>
-                <button onClick={moveSelectedToNewGroup} className="w-full rounded border border-neutral-300 px-2 py-1 text-xs">
+                <button onClick={moveSelectedToNewGroup} className="btn-secondary w-full !px-2.5 !py-1.5 text-xs">
                   Move to new group
                 </button>
               </div>
             )}
           </section>
 
-          <section className="rounded-lg border border-neutral-200 bg-white p-4">
+          <section className="card p-4">
             <h2 className="mb-2 font-semibold">Albums</h2>
             <ul className="space-y-2">
               {albums.map((a) => (
                 <li key={a.id}>
-                  <a href={`#/albums/${a.id}`} className="block rounded border border-neutral-200 px-3 py-2 text-sm hover:border-brand">
+                  <a
+                    href={`#/albums/${a.id}`}
+                    className="block rounded-lg border border-slate-200 px-3 py-2 text-sm transition-colors hover:border-brand hover:bg-indigo-50/50"
+                  >
                     {a.name} · {a.pageCount} pages
                   </a>
                 </li>
               ))}
-              {albums.length === 0 && <p className="text-sm text-neutral-400">No albums yet.</p>}
+              {albums.length === 0 && <p className="text-sm text-slate-400">No albums yet.</p>}
             </ul>
           </section>
         </aside>
       </div>
+
+      {prompt && (
+        <PromptModal
+          title={prompt.title}
+          defaultValue={prompt.initial}
+          onConfirm={(v) => {
+            prompt.onConfirm(v);
+            setPrompt(null);
+          }}
+          onCancel={() => setPrompt(null)}
+        />
+      )}
     </div>
   );
 }

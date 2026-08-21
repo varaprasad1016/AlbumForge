@@ -117,8 +117,20 @@ function templateSummaryDto(row: Record<string, unknown>): TemplateSummary {
 export function registerIpc(ctx: IpcContext): void {
   const { db, cacheDir, dataDir, getWindow } = ctx;
 
+  // Auto-update lifecycle → renderer events.
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  const send = (ev: unknown) => getWindow()?.webContents.send("update:event", ev);
+  autoUpdater.on("checking-for-update", () => send({ type: "checking" }));
+  autoUpdater.on("update-available", (info) => send({ type: "available", version: info.version }));
+  autoUpdater.on("update-not-available", () => send({ type: "not-available" }));
+  autoUpdater.on("download-progress", (p) => send({ type: "progress", percent: Math.round(p.percent) }));
+  autoUpdater.on("update-downloaded", (info) => send({ type: "downloaded", version: info.version }));
+  autoUpdater.on("error", (err) => send({ type: "error", message: err?.message ?? String(err) }));
+
   ipcMain.handle("app:info", () => ({
-    version: "0.1.0",
+    version: app.getVersion(),
+    author: "Vara",
     dataPath: dataDir,
     cachePath: cacheDir,
   }));
@@ -137,15 +149,17 @@ export function registerIpc(ctx: IpcContext): void {
   });
 
   ipcMain.handle("app:checkForUpdates", async () => {
-    if (!app.isPackaged) return "Updates are only checked in the packaged app.";
+    if (!app.isPackaged) return "Updates are only available in the installed app.";
     try {
-      const result = await autoUpdater.checkForUpdates();
-      return result && result.updateInfo.version
-        ? `Update available: ${result.updateInfo.version}`
-        : "You are up to date.";
+      await autoUpdater.checkForUpdates();
+      return "checking";
     } catch (e) {
       return `Update check failed: ${String(e)}`;
     }
+  });
+
+  ipcMain.handle("app:installUpdate", () => {
+    autoUpdater.quitAndInstall();
   });
 
   ipcMain.handle("dialogs:chooseImages", async () => {

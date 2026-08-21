@@ -9,11 +9,10 @@ files:
 asarUnpack:
   - node_modules/sharp/**
   - node_modules/better-sqlite3/**
-# Auto-update feed (electron-updater). Point this at your release server/repo before
-# enabling auto-update; leave unset for manual distribution.
-# publish:
-#   provider: generic
-#   url: https://updates.example.com/albumforge
+publish:
+  - provider: github
+    owner: varaprasad1016
+    repo: AlbumForge
 win:
   target:
     - nsis
@@ -21,15 +20,10 @@ win:
   # Skip rcedit/code-signing so packaging works without Windows Developer Mode
   # (no certificate yet). Re-enable and provide a cert for production.
   signAndEditExecutable: false
-  # Code signing (provide a cert + password via env: CSC_LINK / CSC_KEY_PASSWORD).
-  # certificateFile: build/cert.pfx
-  # certificatePassword: ${CSC_KEY_PASSWORD}
 nsis:
-  oneClick: false
-  allowToChangeInstallationDirectory: true
+  oneClick: true
   createDesktopShortcut: true
 mac:
   category: public.app-category.photography
   target:
     - dmg
-  # identity: ${APPLE_IDENTITY}

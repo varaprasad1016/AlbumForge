@@ -1,9 +1,9 @@
 {
   "name": "albumforge",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "AlbumForge — automatically compose professionally laid-out albums from finished photographs. Local Windows desktop app.",
   "main": "./out/main/index.js",
-  "author": "AlbumForge",
+  "author": "Vara",
   "license": "UNLICENSED",
   "private": true,
   "scripts": {

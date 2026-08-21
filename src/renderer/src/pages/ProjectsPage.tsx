@@ -23,54 +23,103 @@ export default function ProjectsPage() {
     await load();
   }
 
+  async function deleteProject(p: Project) {
+    if (!window.confirm(`Delete project "${p.name}" and all its photos and albums? This cannot be undone.`)) return;
+    await window.albumforge.projects.remove(p.id);
+    await load();
+  }
+
   return (
     <div>
-      <h1 className="mb-6 text-2xl font-bold">Projects</h1>
-
       {projects.length === 0 && (
-        <div className="mb-8 rounded-lg border border-brand/20 bg-white p-8 text-center">
-          <h2 className="text-xl font-semibold text-ink">Welcome to AlbumForge</h2>
-          <p className="mx-auto mt-2 max-w-xl text-sm text-neutral-500">
-            Turn thousands of finished photographs into professionally laid-out albums
-            automatically. Create a project, import your photos, choose a template, and
-            generate complete album proposals — all on this computer, nothing uploaded.
-          </p>
-          <p className="mt-4 text-sm text-neutral-600">Create your first project below to get started.</p>
+        <div className="card mb-8 overflow-hidden">
+          <div className="bg-gradient-to-br from-indigo-500 to-violet-600 p-8 text-center text-white">
+            <span className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-white/20 text-xl font-bold backdrop-blur">
+              A
+            </span>
+            <h2 className="text-2xl font-bold">Welcome to AlbumForge</h2>
+            <p className="mx-auto mt-2 max-w-xl text-sm text-indigo-100">
+              Turn thousands of finished photographs into professionally laid-out albums
+              automatically — create a project, import your photos, pick a template, and
+              generate complete album proposals. All on this computer, nothing uploaded.
+            </p>
+          </div>
+          <div className="p-6">
+            <h1 className="mb-3 text-lg font-semibold text-ink">Create your first project</h1>
+            <form onSubmit={create} className="flex flex-wrap gap-2">
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Project name (e.g. Wedding — John & Sarah)"
+                className="input flex-1 min-w-[220px]"
+              />
+              <input
+                value={clientName}
+                onChange={(e) => setClientName(e.target.value)}
+                placeholder="Client (optional)"
+                className="input w-48"
+              />
+              <button type="submit" className="btn-primary">
+                Create project
+              </button>
+            </form>
+          </div>
         </div>
       )}
 
-      <form onSubmit={create} className="mb-6 flex gap-2">
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Project name (e.g. Wedding — John & Sarah)"
-          className="flex-1 rounded border border-neutral-300 px-3 py-2 text-sm"
-        />
-        <input
-          value={clientName}
-          onChange={(e) => setClientName(e.target.value)}
-          placeholder="Client (optional)"
-          className="w-56 rounded border border-neutral-300 px-3 py-2 text-sm"
-        />
-        <button type="submit" className="rounded bg-brand px-4 py-2 text-sm font-semibold text-white">
-          Create project
-        </button>
-      </form>
+      {projects.length > 0 && (
+        <>
+          <div className="mb-6 flex items-center justify-between">
+            <h1 className="text-2xl font-bold">Projects</h1>
+          </div>
 
-      <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {projects.map((p) => (
-          <li key={p.id}>
-            <a
-              href={`#/projects/${p.id}`}
-              className="block rounded-lg border border-neutral-200 bg-white p-4 hover:border-brand"
-            >
-              <div className="font-semibold">{p.name}</div>
-              {p.clientName && <div className="text-sm text-neutral-400">{p.clientName}</div>}
-            </a>
-          </li>
-        ))}
-        {projects.length === 0 && <p className="col-span-full text-neutral-400">No projects yet.</p>}
-      </ul>
+          <form onSubmit={create} className="mb-6 flex flex-wrap gap-2">
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Project name (e.g. Wedding — John & Sarah)"
+              className="input flex-1 min-w-[220px]"
+            />
+            <input
+              value={clientName}
+              onChange={(e) => setClientName(e.target.value)}
+              placeholder="Client (optional)"
+              className="input w-48"
+            />
+            <button type="submit" className="btn-primary">
+              Create project
+            </button>
+          </form>
+
+          <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {projects.map((p) => (
+              <li key={p.id} className="group relative">
+                <a
+                  href={`#/projects/${p.id}`}
+                  className="card block p-5 transition-all hover:-translate-y-0.5 hover:shadow-md"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-100 to-violet-100 text-sm font-bold text-indigo-600">
+                      {p.name.charAt(0).toUpperCase()}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="truncate font-semibold text-ink group-hover:text-brand">{p.name}</div>
+                      {p.clientName && <div className="truncate text-sm text-slate-400">{p.clientName}</div>}
+                    </div>
+                  </div>
+                </a>
+                <button
+                  onClick={() => deleteProject(p)}
+                  title="Delete project"
+                  className="absolute right-3 top-3 rounded-lg p-1.5 text-slate-400 opacity-0 transition-opacity hover:bg-red-50 hover:text-red-600 group-hover:opacity-100"
+                >
+                  ✕
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </div>
   );
 }

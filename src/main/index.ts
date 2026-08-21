@@ -1,12 +1,46 @@
 /** Electron main process entry point. */
-import { app, BrowserWindow, net, protocol } from "electron";
-import { autoUpdater } from "electron-updater";
+import { app, BrowserWindow, Menu, net, protocol } from "electron";
 import { mkdirSync } from "fs";
 import { join } from "path";
 import { pathToFileURL } from "url";
 import { DB, initDatabase } from "./db";
 import { registerIpc } from "./ipc";
 import { seedTemplates } from "./seed";
+
+function buildMenu(): void {
+  const template: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: "Edit",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "selectAll" },
+      ],
+    },
+    {
+      label: "View",
+      submenu: [
+        { role: "reload" },
+        { role: "toggleDevTools" },
+        { type: "separator" },
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+      ],
+    },
+    {
+      label: "Window",
+      submenu: [{ role: "minimize" }, { role: "close" }],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
 
 protocol.registerSchemesAsPrivileged([
   { scheme: "media", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
@@ -20,6 +54,7 @@ function createWindow(): void {
     width: 1440,
     height: 920,
     show: false,
+    autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       sandbox: false,
@@ -38,6 +73,8 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  buildMenu();
+
   const dataDir = app.getPath("userData");
   const cacheDir = join(dataDir, "cache");
   mkdirSync(cacheDir, { recursive: true });
@@ -66,12 +103,6 @@ app.whenReady().then(() => {
   registerIpc({ db, cacheDir, dataDir, getWindow: () => mainWindow });
 
   createWindow();
-
-  // Opt-in automatic update checks (packaged builds only; requires a publish provider
-  // configured in electron-builder.yml / electron-updater).
-  if (app.isPackaged && process.env.ALBUMFORGE_AUTO_UPDATE === "1") {
-    autoUpdater.checkForUpdates().catch(() => {});
-  }
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

@@ -195,7 +195,7 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } {
   return { r: (v >> 16) & 255, g: (v >> 8) & 255, b: v & 255 };
 }
 
-function hexToPdf(hex: string): { r: number; g: number; b: number } {
+function hexToPdf(hex: string): import("pdf-lib").Color {
   const c = hexToRgb(hex);
   return rgb(c.r / 255, c.g / 255, c.b / 255);
 }

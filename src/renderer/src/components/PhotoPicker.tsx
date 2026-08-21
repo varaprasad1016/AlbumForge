@@ -35,7 +35,7 @@ export default function PhotoPicker({
       >
         <div className="mb-3 flex items-center justify-between">
           <h2 className="font-semibold">Choose a photo</h2>
-          <button onClick={onClose} className="text-neutral-400 hover:text-neutral-700">
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700">
             ✕
           </button>
         </div>
