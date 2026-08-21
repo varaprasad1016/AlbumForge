@@ -31,3 +31,9 @@ mac:
   category: public.app-category.photography
   target:
     - dmg
+    - zip
+  # Unsigned for now (no Apple Developer certificate). Users will see a Gatekeeper
+  # warning: right-click → Open. Notarization requires an Apple Developer account.
+  identity: null
+  hardenedRuntime: false
+  artifactName: ${productName}-${version}-${arch}.${ext}
