@@ -38,19 +38,25 @@ jobs:
         working-directory: mobile
         run: npx cap sync android
 
-      - name: Build debug APK
+      - name: Read app version
+        id: version
+        working-directory: mobile
+        shell: bash
+        run: echo "VERSION=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+
+      - name: Build debug APK (fixed demo keystore)
         working-directory: mobile/android
-        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon -PafVersionName=${{ steps.version.outputs.VERSION }}
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: albumforge-android
-          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          path: mobile/android/app/build/outputs/apk/debug/*.apk
 
       - name: Publish APK to release
         if: startsWith(github.ref, 'refs/tags/m-')
         uses: softprops/action-gh-release@v2
         with:
           prerelease: true
-          files: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          files: mobile/android/app/build/outputs/apk/debug/*.apk
