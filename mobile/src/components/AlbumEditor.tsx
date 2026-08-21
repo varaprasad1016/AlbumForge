@@ -15,8 +15,6 @@ import PhotoPicker from "./PhotoPicker";
 import PromptModal from "./PromptModal";
 import { useFonts } from "./useFonts";
 
-const PAGE_W = 600;
-
 interface LayoutOption {
   key: string;
   name: string;
@@ -63,6 +61,17 @@ export default function AlbumEditor({
   onPagesChanged: (pages: AlbumPage[]) => void;
 }) {
   const aspect = pageSize.width / pageSize.height;
+  const stageWrapRef = useRef<HTMLDivElement>(null);
+  const [stageWidth, setStageWidth] = useState(360);
+  useEffect(() => {
+    const el = stageWrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => setStageWidth(entries[0].contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const PAD = 16;
+  const PAGE_W = Math.max(240, stageWidth - 2 * PAD - 16);
   const PAGE_H = PAGE_W / aspect;
 
   const [pageIndex, setPageIndex] = useState(0);
@@ -425,12 +434,12 @@ export default function AlbumEditor({
         </div>
       </div>
 
-      <div className="flex justify-center rounded-lg bg-neutral-200 p-6">
-        <Stage width={PAGE_W + 80} height={PAGE_H + 80}>
+      <div ref={stageWrapRef} className="flex justify-center overflow-x-auto rounded-xl bg-slate-100 p-2">
+        <Stage width={PAGE_W + 2 * PAD} height={PAGE_H + 2 * PAD}>
           <Layer>
             <Rect
-              x={40}
-              y={40}
+              x={PAD}
+              y={PAD}
               width={PAGE_W}
               height={PAGE_H}
               fill={background}
@@ -439,11 +448,11 @@ export default function AlbumEditor({
             />
             <Line
               points={[
-                40 + safeInset, 40 + safeInset,
-                40 + PAGE_W - safeInset, 40 + safeInset,
-                40 + PAGE_W - safeInset, 40 + PAGE_H - safeInset,
-                40 + safeInset, 40 + PAGE_H - safeInset,
-                40 + safeInset, 40 + safeInset,
+                PAD + safeInset, PAD + safeInset,
+                PAD + PAGE_W - safeInset, PAD + safeInset,
+                PAD + PAGE_W - safeInset, PAD + PAGE_H - safeInset,
+                PAD + safeInset, PAD + PAGE_H - safeInset,
+                PAD + safeInset, PAD + safeInset,
               ]}
               stroke="#5b5bd6"
               dash={[6, 4]}
@@ -453,8 +462,8 @@ export default function AlbumEditor({
               <ElementNode
                 key={el.id}
                 el={el}
-                pageX={40}
-                pageY={40}
+                pageX={PAD}
+                pageY={PAD}
                 pageW={PAGE_W}
                 pageH={PAGE_H}
                 selected={selectedId === el.id}

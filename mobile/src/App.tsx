@@ -33,8 +33,8 @@ export default function App() {
 
   return (
     <div className="min-h-screen">
+      <main className="mx-auto w-full max-w-lg px-4 pb-24 pt-4">{page}</main>
       <Nav />
-      <main className="mx-auto max-w-7xl p-6">{page}</main>
     </div>
   );
 }

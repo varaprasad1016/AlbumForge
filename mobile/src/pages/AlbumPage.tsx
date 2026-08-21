@@ -62,23 +62,26 @@ export default function AlbumPage({ albumId }: { albumId: string }) {
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-2xl font-bold">{album?.name ?? "Album"}</h1>
-        <div className="flex gap-2">
-          {(["editor", "versions", "export"] as Tab[]).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`rounded-lg px-4 py-1.5 text-sm font-semibold capitalize transition-colors ${
-                tab === t
-                  ? "bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-sm"
-                  : "text-slate-600 hover:bg-slate-100"
-              }`}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
+      <header className="mb-3 flex items-center gap-3">
+        <a href="#/albums" className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-600">
+          <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+        </a>
+        <h1 className="min-w-0 flex-1 truncate text-lg font-bold">{album?.name ?? "Album"}</h1>
+      </header>
+      <div className="mb-3 flex rounded-xl bg-slate-100 p-1">
+        {(["editor", "versions", "export"] as Tab[]).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`flex-1 rounded-lg py-2 text-sm font-semibold capitalize transition-colors ${
+              tab === t ? "bg-white text-brand shadow-sm" : "text-slate-500"
+            }`}
+          >
+            {t}
+          </button>
+        ))}
       </div>
 
       {tab === "editor" && album && (
