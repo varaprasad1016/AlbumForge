@@ -1,6 +1,7 @@
 /** Generation + DTO helpers (mobile). */
 import { all, get, newId, now, run } from "./db";
 import { generateAlbum } from "./engine/generator";
+import { isSpreadLayout } from "./engine/layouts";
 import { selectForMode } from "./engine/selection";
 import { PageStyle, PhotoRecord, TemplateFamily } from "./engine/types";
 import type { Album, AlbumPage, GenerateInput, Photo, Project } from "./api";
@@ -66,6 +67,7 @@ export function pageDto(row: any): AlbumPage {
     id: row.id,
     index: row.idx,
     layoutKey: row.layout_key,
+    isSpread: isSpreadLayout(row.layout_key),
     background: row.background ? JSON.parse(row.background) : null,
     elements: elements.map((el: any) => ({
       id: el.id,

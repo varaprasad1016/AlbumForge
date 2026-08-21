@@ -73,6 +73,7 @@ export interface ElementDef {
 
 export interface PageDef {
   layoutKey: string;
+  spread: boolean;
   elements: ElementDef[];
 }
 

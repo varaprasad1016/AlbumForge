@@ -4,7 +4,7 @@ import { computeCrop } from "./cropping";
 import { generateAlbum } from "./generator";
 import { findDuplicatePairs, segmentByTime } from "./grouping";
 import { composePage } from "./layoutEngine";
-import { LAYOUT_CATALOG } from "./layouts";
+import { isSpreadLayout, LAYOUT_CATALOG } from "./layouts";
 import { hamming, isNearDuplicate } from "./scoring";
 import { selectDiverse } from "./selection";
 import { chooseLayout } from "./templateEngine";
@@ -184,5 +184,58 @@ describe("generator", () => {
 
   it("throws on empty photo set", () => {
     expect(() => generateAlbum([], FAMILY, SPEC, 1)).toThrow();
+  });
+});
+
+describe("spreads", () => {
+  const SPREAD_FAMILY: TemplateFamily = {
+    key: "spready",
+    name: "Spready",
+    layouts: [
+      ["spread_hero", 3.0],
+      ["spread_triptych", 3.0],
+      ["full_bleed", 1.0],
+    ],
+    style: { margin: 0.02, gutter: 0.03, bleed: 0, safeArea: 0.05 },
+    chronological: true,
+  };
+
+  it("isSpreadLayout detects spread keys", () => {
+    expect(isSpreadLayout("spread_hero")).toBe(true);
+    expect(isSpreadLayout("spread_triptych")).toBe(true);
+    expect(isSpreadLayout("full_bleed")).toBe(false);
+    expect(isSpreadLayout(null)).toBe(false);
+  });
+
+  it("composes spread slots against the double page aspect", () => {
+    const photos = makePhotos(10);
+    for (const key of ["spread_hero", "spread_two", "spread_triptych", "spread_grid_four"]) {
+      for (const el of composePage(LAYOUT_CATALOG[key], photos, 2)) {
+        expect(el.x + el.width).toBeLessThanOrEqual(1 + 1e-6);
+        expect(el.y + el.height).toBeLessThanOrEqual(1 + 1e-6);
+        if (el.crop) {
+          expect(el.crop.width / el.crop.height).toBeGreaterThan(0.5);
+        }
+      }
+    }
+  });
+
+  it("generator flags spread pages and composes them across the open canvas", () => {
+    const result = generateAlbum(makePhotos(120), SPREAD_FAMILY, SPEC, 1);
+    const spreads = result.pages.filter((p) => p.spread);
+    expect(spreads.length).toBeGreaterThan(0);
+    for (const p of result.pages) {
+      expect(p.spread).toBe(isSpreadLayout(p.layoutKey));
+    }
+    for (const p of spreads) {
+      expect(p.elements.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("never places two spreads back to back", () => {
+    const result = generateAlbum(makePhotos(300), SPREAD_FAMILY, { ...SPEC, pageCount: 30 }, 1);
+    for (let i = 1; i < result.pages.length; i++) {
+      expect(result.pages[i].spread && result.pages[i - 1].spread).toBe(false);
+    }
   });
 });

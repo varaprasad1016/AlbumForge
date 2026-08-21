@@ -2,6 +2,7 @@
  * with pdf-lib (correct physical size + trim/bleed/media boxes). */
 import sharp from "sharp";
 import { PDFDocument, StandardFonts, degrees, rgb } from "pdf-lib";
+import { isSpreadLayout } from "./engine/layouts";
 
 const MM_PER_INCH = 25.4;
 const PT_PER_MM = 72 / MM_PER_INCH;
@@ -70,12 +71,19 @@ export async function renderPageJpeg(
     let left = bleedPx + el.x * pageWpx;
     let top = bleedPx + el.y * pageHpx;
 
-    if (el.width >= 0.99 && el.height >= 0.99) {
+    // Extend into the outer bleed only on edges the element actually touches.
+    // On spread canvases this keeps the gutter (x=0.5) clean — no bleed across
+    // the fold — while outer edges stay print-safe.
+    if (el.x <= 0.001) {
       left -= bleedPx;
-      top -= bleedPx;
-      boxW += 2 * bleedPx;
-      boxH += 2 * bleedPx;
+      boxW += bleedPx;
     }
+    if (el.x + el.width >= 0.999) boxW += bleedPx;
+    if (el.y <= 0.001) {
+      top -= bleedPx;
+      boxH += bleedPx;
+    }
+    if (el.y + el.height >= 0.999) boxH += bleedPx;
 
     // With an explicit crop the aspect already matches, so fill exactly. Without a crop,
     // cover (center-crop to fill) prevents distortion.
@@ -97,6 +105,86 @@ export async function renderPageJpeg(
     .composite(composites)
     .jpeg({ quality: 95 })
     .toBuffer();
+}
+
+/** Render a two-page spread as a single wide canvas (outer bleed on both sides,
+ * none at the gutter) and slice it into left/right page images at the fold. */
+export async function renderSpreadJpegs(
+  page: ExportPage,
+  resolvePhoto: PhotoResolver,
+  pageWpx: number,
+  pageHpx: number,
+  bleedPx: number,
+): Promise<[Buffer, Buffer]> {
+  const spreadWpx = 2 * pageWpx;
+  const canvasW = spreadWpx + 2 * bleedPx;
+  const canvasH = pageHpx + 2 * bleedPx;
+
+  const bgHex = page.background?.color ?? "#ffffff";
+  const composites: Array<{ input: Buffer; left: number; top: number }> = [];
+
+  const elements = page.elements.slice().sort((a, b) => a.z - b.z);
+  for (const el of elements) {
+    if (el.type !== "image" || !el.photoId) continue;
+    const photo = resolvePhoto(el.photoId);
+
+    let pipeline = sharp(photo.path).rotate();
+    if (el.crop) {
+      const left = Math.round(el.crop.x * photo.width);
+      const top = Math.round(el.crop.y * photo.height);
+      const width = Math.max(1, Math.round(el.crop.width * photo.width));
+      const height = Math.max(1, Math.round(el.crop.height * photo.height));
+      pipeline = pipeline.extract({ left, top, width, height });
+    }
+    if (el.rotation) {
+      pipeline = pipeline.rotate(el.rotation);
+    }
+
+    let boxW = Math.round(el.width * spreadWpx);
+    let boxH = Math.round(el.height * pageHpx);
+    let left = bleedPx + el.x * spreadWpx;
+    let top = bleedPx + el.y * pageHpx;
+
+    if (el.x <= 0.001) {
+      left -= bleedPx;
+      boxW += bleedPx;
+    }
+    if (el.x + el.width >= 0.999) boxW += bleedPx;
+    if (el.y <= 0.001) {
+      top -= bleedPx;
+      boxH += bleedPx;
+    }
+    if (el.y + el.height >= 0.999) boxH += bleedPx;
+
+    const buf = await pipeline
+      .resize(boxW, boxH, { fit: el.crop ? "fill" : "cover" })
+      .jpeg({ quality: 95 })
+      .toBuffer();
+    composites.push({ input: buf, left: Math.round(left), top: Math.round(top) });
+  }
+
+  const canvas = await sharp({
+    create: {
+      width: canvasW,
+      height: canvasH,
+      channels: 3,
+      background: hexToRgb(bgHex),
+    },
+  })
+    .composite(composites)
+    .jpeg({ quality: 95 })
+    .toBuffer();
+
+  const halfW = pageWpx + bleedPx;
+  const leftJpeg = await sharp(canvas)
+    .extract({ left: 0, top: 0, width: halfW, height: canvasH })
+    .jpeg({ quality: 95 })
+    .toBuffer();
+  const rightJpeg = await sharp(canvas)
+    .extract({ left: halfW, top: 0, width: halfW, height: canvasH })
+    .jpeg({ quality: 95 })
+    .toBuffer();
+  return [leftJpeg, rightJpeg];
 }
 
 export async function buildPdf(
@@ -121,18 +209,18 @@ export async function buildPdf(
   const defaultFont = await doc.embedFont(StandardFonts.Helvetica);
   const fontCache = new Map<string, import("pdf-lib").PDFFont>();
 
-  for (const page of pages) {
-    const jpeg = await renderPageJpeg(page, resolvePhoto, pageWpx, pageHpx, bleedPx);
+  const addPdfPage = async (
+    jpeg: Buffer,
+    xOffPt: number,
+  ): Promise<import("pdf-lib").PDFPage> => {
     const img = await doc.embedJpg(jpeg);
-
     const pdfPage = doc.addPage([mediaWmm * PT_PER_MM, mediaHmm * PT_PER_MM]);
     pdfPage.drawImage(img, {
-      x: 0,
+      x: xOffPt,
       y: 0,
-      width: mediaWmm * PT_PER_MM,
+      width: (widthMm + bleedMm) * PT_PER_MM,
       height: mediaHmm * PT_PER_MM,
     });
-
     pdfPage.setMediaBox(0, 0, mediaWmm * PT_PER_MM, mediaHmm * PT_PER_MM);
     pdfPage.setBleedBox(0, 0, mediaWmm * PT_PER_MM, mediaHmm * PT_PER_MM);
     pdfPage.setTrimBox(
@@ -141,19 +229,45 @@ export async function buildPdf(
       (bleedMm + widthMm) * PT_PER_MM,
       (bleedMm + heightMm) * PT_PER_MM,
     );
+    return pdfPage;
+  };
 
-    await drawTextElements(
-      doc,
-      pdfPage,
-      page,
-      defaultFont,
-      fontCache,
-      resolveFont ?? (() => null),
-      widthMm,
-      heightMm,
-      bleedMm,
-    );
-    if (watermark) drawWatermark(pdfPage, defaultFont, watermark, mediaWmm, mediaHmm);
+  for (const page of pages) {
+    if (isSpreadLayout(page.layoutKey)) {
+      const [leftJpeg, rightJpeg] = await renderSpreadJpegs(page, resolvePhoto, pageWpx, pageHpx, bleedPx);
+      for (const half of ["left", "right"] as const) {
+        const isRight = half === "right";
+        const pdfPage = await addPdfPage(isRight ? rightJpeg : leftJpeg, isRight ? bleedMm * PT_PER_MM : 0);
+        await drawTextElements(
+          doc,
+          pdfPage,
+          page,
+          defaultFont,
+          fontCache,
+          resolveFont ?? (() => null),
+          widthMm,
+          heightMm,
+          bleedMm,
+          half,
+        );
+        if (watermark) drawWatermark(pdfPage, defaultFont, watermark, mediaWmm, mediaHmm);
+      }
+    } else {
+      const jpeg = await renderPageJpeg(page, resolvePhoto, pageWpx, pageHpx, bleedPx);
+      const pdfPage = await addPdfPage(jpeg, 0);
+      await drawTextElements(
+        doc,
+        pdfPage,
+        page,
+        defaultFont,
+        fontCache,
+        resolveFont ?? (() => null),
+        widthMm,
+        heightMm,
+        bleedMm,
+      );
+      if (watermark) drawWatermark(pdfPage, defaultFont, watermark, mediaWmm, mediaHmm);
+    }
   }
 
   return doc.save();
@@ -190,12 +304,20 @@ async function drawTextElements(
   widthMm: number,
   heightMm: number,
   bleedMm: number,
+  half?: "left" | "right",
 ): Promise<void> {
   const pageHpt = (heightMm + 2 * bleedMm) * PT_PER_MM;
   for (const el of page.elements) {
     if (el.type !== "text") continue;
     const content = el.text?.content;
     if (!content) continue;
+
+    let xNorm = el.x;
+    if (half) {
+      const side: "left" | "right" = el.x + (el.width || 0) / 2 < 0.5 ? "left" : "right";
+      if (side !== half) continue;
+      xNorm = Math.max(0.01, Math.min((el.x - (half === "right" ? 0.5 : 0)) * 2, 0.9));
+    }
 
     const family = (el.style?.fontFamily as string) || "";
     let font = defaultFont;
@@ -220,7 +342,7 @@ async function drawTextElements(
 
     const fontSize = el.style?.fontSize ?? 18;
     const color = el.style?.color ?? "#000000";
-    const x = (bleedMm + el.x * widthMm) * PT_PER_MM;
+    const x = (bleedMm + xNorm * widthMm) * PT_PER_MM;
     const y = pageHpt - (bleedMm + el.y * heightMm) * PT_PER_MM - fontSize;
     pdfPage.drawText(content, { x, y, size: fontSize, font, color: hexToPdf(color) });
   }

@@ -1,5 +1,5 @@
 /** Template engine: weighted, non-repetitive layout selection per template family. */
-import { LAYOUT_CATALOG, Layout } from "./layouts";
+import { isSpreadLayout, LAYOUT_CATALOG, Layout } from "./layouts";
 import { Rng, weightedChoice } from "./rng";
 import { TemplateFamily } from "./types";
 
@@ -32,6 +32,10 @@ export function chooseLayout(
   if (pool.length > 1 && history.length > 0) {
     const filtered = pool.filter(([l]) => l.key !== history[history.length - 1]);
     if (filtered.length > 0) pool = filtered;
+    if (isSpreadLayout(history[history.length - 1])) {
+      const nonSpread = pool.filter(([l]) => !isSpreadLayout(l.key));
+      if (nonSpread.length > 0) pool = nonSpread;
+    }
   }
 
   return weightedChoice(

@@ -100,6 +100,7 @@ export interface AlbumPage {
   id: string;
   index: number;
   layoutKey: string | null;
+  isSpread: boolean;
   background: Record<string, unknown> | null;
   elements: AlbumElement[];
 }

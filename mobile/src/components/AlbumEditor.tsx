@@ -71,8 +71,6 @@ export default function AlbumEditor({
     return () => ro.disconnect();
   }, []);
   const PAD = 16;
-  const PAGE_W = Math.max(240, stageWidth - 2 * PAD - 16);
-  const PAGE_H = PAGE_W / aspect;
 
   const [pageIndex, setPageIndex] = useState(0);
   const [pagesState, setPagesState] = useState<AlbumPage[]>(pages);
@@ -97,6 +95,9 @@ export default function AlbumEditor({
   const elements = page?.elements ?? [];
   const selected = elements.find((e) => e.id === selectedId);
   const background = (page?.background as { color?: string } | null)?.color ?? "#ffffff";
+  const spread = page?.isSpread ?? false;
+  const PAGE_W = Math.max(240, stageWidth - 2 * PAD - 16);
+  const PAGE_H = PAGE_W / (spread ? aspect * 2 : aspect);
 
   function commit(next: AlbumPage[]) {
     setHistory((h) => [...h, pagesState]);
@@ -458,6 +459,25 @@ export default function AlbumEditor({
               dash={[6, 4]}
               listening={false}
             />
+            {spread && (
+              <>
+                <Line
+                  points={[PAD + PAGE_W / 2, PAD, PAD + PAGE_W / 2, PAD + PAGE_H]}
+                  stroke="#e11d48"
+                  strokeWidth={1.5}
+                  dash={[8, 5]}
+                  listening={false}
+                />
+                <Rect
+                  x={PAD + PAGE_W / 2 - PAGE_W * 0.012}
+                  y={PAD}
+                  width={PAGE_W * 0.024}
+                  height={PAGE_H}
+                  fill="rgba(225, 29, 72, 0.06)"
+                  listening={false}
+                />
+              </>
+            )}
             {elements.map((el) => (
               <ElementNode
                 key={el.id}

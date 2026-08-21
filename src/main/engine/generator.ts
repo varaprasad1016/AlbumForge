@@ -5,6 +5,7 @@ layout stream, lead/hero selection, and bounded reordering for non-chronological
 families — while remaining professionally coherent.
 */
 import { composePage } from "./layoutEngine";
+import { isSpreadLayout } from "./layouts";
 import { Rng, seededRandom, shuffle } from "./rng";
 import { albumScore } from "./scoring";
 import { chooseLayout } from "./templateEngine";
@@ -82,8 +83,9 @@ export function generateAlbum(
     const take = Math.min(layout.slots.length, remaining.length);
     const pagePhotos = remaining.slice(0, take);
     remaining = remaining.slice(take);
-    const elements = composePage(layout, pagePhotos, spec.pageAspect);
-    pages.push({ layoutKey: layout.key, elements });
+    const spread = isSpreadLayout(layout.key);
+    const elements = composePage(layout, pagePhotos, spec.pageAspect * (spread ? 2 : 1));
+    pages.push({ layoutKey: layout.key, spread, elements });
     history.push(layout.key);
   }
 

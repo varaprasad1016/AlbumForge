@@ -2,7 +2,7 @@
 import { Directory, Filesystem } from "@capacitor/filesystem";
 import { all, get, newId, now, persistDb, run } from "./db";
 import { buildPdf, ExportPage } from "./export";
-import { LAYOUT_CATALOG } from "./engine/layouts";
+import { isSpreadLayout, LAYOUT_CATALOG } from "./engine/layouts";
 import { composePage } from "./engine/layoutEngine";
 import { resolveFont, resolvePhoto } from "./backend-helpers";
 import { albumDto, albumPages, generateAndPersist, pageAspect, pageDto, pageSizeMm } from "./generate";
@@ -57,7 +57,7 @@ export function buildAlbumsApi(): any {
         const layout = LAYOUT_CATALOG[layoutKey];
         if (!layout) throw new Error("Unknown layout");
         const album = albumDto(get("SELECT * FROM albums WHERE id = ?", [albumId]));
-        const aspect = pageAspect(album.pageSize);
+        const aspect = pageAspect(album.pageSize) * (isSpreadLayout(layoutKey) ? 2 : 1);
         const els = all("SELECT photo_id FROM album_elements WHERE page_id = ? ORDER BY z", [pageId]);
         const photos = els.filter((e: any) => e.photo_id).map((e: any) => photoRecordById(e.photo_id));
         const composed = composePage(layout, photos, aspect);

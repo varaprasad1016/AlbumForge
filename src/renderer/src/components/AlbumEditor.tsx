@@ -59,8 +59,7 @@ export default function AlbumEditor({
   const aspect = pageSize.width / pageSize.height;
   const PAGE_H = PAGE_W / aspect;
 
-  const [pageIndex, setPageIndex] = useState(0);
-  const [pagesState, setPagesState] = useState<AlbumPage[]>(pages);
+  const [pageIndex, setPageIndex] = useState(0);  const [pagesState, setPagesState] = useState<AlbumPage[]>(pages);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [history, setHistory] = useState<AlbumPage[][]>([]);
   const [future, setFuture] = useState<AlbumPage[][]>([]);
@@ -82,6 +81,8 @@ export default function AlbumEditor({
   const elements = page?.elements ?? [];
   const selected = elements.find((e) => e.id === selectedId);
   const background = (page?.background as { color?: string } | null)?.color ?? "#ffffff";
+  const spread = page?.isSpread ?? false;
+  const canvasW = spread ? PAGE_W * 2 : PAGE_W;
 
   function commit(next: AlbumPage[]) {
     setHistory((h) => [...h, pagesState]);
@@ -251,9 +252,9 @@ export default function AlbumEditor({
     (el: { id: string }) => (e: Konva.KonvaEventObject<Event>) => {
       const node = e.target as Konva.Group;
       updateElement(el.id, {
-        x: node.x() / PAGE_W,
+        x: node.x() / canvasW,
         y: node.y() / PAGE_H,
-        width: (node.width() * node.scaleX()) / PAGE_W,
+        width: (node.width() * node.scaleX()) / canvasW,
         height: (node.height() * node.scaleY()) / PAGE_H,
         rotation: node.rotation(),
       });
@@ -261,16 +262,16 @@ export default function AlbumEditor({
       node.scaleY(1);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [page?.id, PAGE_H, pagesState],
+    [page?.id, PAGE_H, canvasW, pagesState],
   );
 
   const onDragEnd = useCallback(
     (el: { id: string }) => (e: Konva.KonvaEventObject<DragEvent>) => {
       const node = e.target as Konva.Group;
-      updateElement(el.id, { x: node.x() / PAGE_W, y: node.y() / PAGE_H });
+      updateElement(el.id, { x: node.x() / canvasW, y: node.y() / PAGE_H });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [page?.id, PAGE_H, pagesState],
+    [page?.id, PAGE_H, canvasW, pagesState],
   );
 
   useEffect(() => {
@@ -306,7 +307,7 @@ export default function AlbumEditor({
 
   if (!page) return null;
 
-  const safeInset = PAGE_W * 0.05;
+  const safeInset = canvasW * 0.05;
 
   return (
     <div className="flex flex-col gap-4">
@@ -419,13 +420,13 @@ export default function AlbumEditor({
         </div>
       </div>
 
-      <div className="flex justify-center rounded-lg bg-neutral-200 p-6">
-        <Stage width={PAGE_W + 80} height={PAGE_H + 80}>
+      <div className="flex justify-center overflow-x-auto rounded-lg bg-neutral-200 p-6">
+        <Stage width={canvasW + 80} height={PAGE_H + 80}>
           <Layer>
             <Rect
               x={40}
               y={40}
-              width={PAGE_W}
+              width={canvasW}
               height={PAGE_H}
               fill={background}
               stroke="#ccc"
@@ -434,8 +435,8 @@ export default function AlbumEditor({
             <Line
               points={[
                 40 + safeInset, 40 + safeInset,
-                40 + PAGE_W - safeInset, 40 + safeInset,
-                40 + PAGE_W - safeInset, 40 + PAGE_H - safeInset,
+                40 + canvasW - safeInset, 40 + safeInset,
+                40 + canvasW - safeInset, 40 + PAGE_H - safeInset,
                 40 + safeInset, 40 + PAGE_H - safeInset,
                 40 + safeInset, 40 + safeInset,
               ]}
@@ -443,13 +444,32 @@ export default function AlbumEditor({
               dash={[6, 4]}
               listening={false}
             />
+            {spread && (
+              <>
+                <Line
+                  points={[40 + canvasW / 2, 40, 40 + canvasW / 2, 40 + PAGE_H]}
+                  stroke="#e11d48"
+                  strokeWidth={1.5}
+                  dash={[8, 5]}
+                  listening={false}
+                />
+                <Rect
+                  x={40 + canvasW / 2 - canvasW * 0.012}
+                  y={40}
+                  width={canvasW * 0.024}
+                  height={PAGE_H}
+                  fill="rgba(225, 29, 72, 0.06)"
+                  listening={false}
+                />
+              </>
+            )}
             {elements.map((el) => (
               <ElementNode
                 key={el.id}
                 el={el}
                 pageX={40}
                 pageY={40}
-                pageW={PAGE_W}
+                pageW={canvasW}
                 pageH={PAGE_H}
                 selected={selectedId === el.id}
                 nodeRef={(n) => {

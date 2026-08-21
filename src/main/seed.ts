@@ -25,6 +25,8 @@ export const TEMPLATE_FAMILIES: TemplateFamilySeed[] = [
       ["three_grid", 1.0],
       ["four_grid", 0.8],
       ["five_asymmetric", 0.5],
+      ["spread_hero", 0.4],
+      ["spread_grid_four", 0.5],
     ],
   },
   {
@@ -40,6 +42,9 @@ export const TEMPLATE_FAMILIES: TemplateFamilySeed[] = [
       ["two_horizontal", 0.8],
       ["three_grid", 0.5],
       ["five_asymmetric", 0.4],
+      ["spread_hero", 0.8],
+      ["spread_two", 0.6],
+      ["spread_triptych", 0.5],
     ],
   },
   {
@@ -55,6 +60,9 @@ export const TEMPLATE_FAMILIES: TemplateFamilySeed[] = [
       ["four_grid", 0.8],
       ["five_asymmetric", 1.0],
       ["six_collage", 0.6],
+      ["spread_hero", 0.7],
+      ["spread_triptych", 0.6],
+      ["spread_triptych_mirror", 0.6],
     ],
   },
   {
@@ -70,6 +78,8 @@ export const TEMPLATE_FAMILIES: TemplateFamilySeed[] = [
       ["three_grid", 0.7],
       ["four_grid", 0.6],
       ["five_asymmetric", 0.8],
+      ["spread_hero", 0.6],
+      ["spread_two", 0.5],
     ],
   },
   {
@@ -84,6 +94,8 @@ export const TEMPLATE_FAMILIES: TemplateFamilySeed[] = [
       ["eight_collage", 1.2],
       ["nine_collage", 1.0],
       ["two_horizontal", 0.5],
+      ["spread_grid_four", 1.0],
+      ["spread_triptych", 0.6],
     ],
   },
   {
@@ -100,6 +112,8 @@ export const TEMPLATE_FAMILIES: TemplateFamilySeed[] = [
       ["centerpiece", 1.0],
       ["two_vertical", 0.7],
       ["three_grid", 0.6],
+      ["spread_hero", 0.6],
+      ["spread_triptych", 0.5],
     ],
   },
   {
@@ -116,6 +130,8 @@ export const TEMPLATE_FAMILIES: TemplateFamilySeed[] = [
       ["four_grid", 0.8],
       ["six_collage", 0.6],
       ["two_horizontal", 0.7],
+      ["spread_hero", 0.5],
+      ["spread_triptych_mirror", 0.5],
     ],
   },
   {
@@ -132,6 +148,8 @@ export const TEMPLATE_FAMILIES: TemplateFamilySeed[] = [
       ["eight_collage", 0.8],
       ["big_three", 0.9],
       ["three_grid", 0.7],
+      ["spread_hero", 1.0],
+      ["spread_two", 0.6],
     ],
   },
 ];
@@ -146,21 +164,34 @@ export function seedTemplates(db: DB): void {
      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`,
   );
   const find = db.prepare("SELECT id FROM templates WHERE key = ?");
+  const layoutKeysFor = db.prepare("SELECT key FROM template_layouts WHERE template_id = ?");
+  const maxSortFor = db.prepare("SELECT COALESCE(MAX(sort_order), 0) AS m FROM template_layouts WHERE template_id = ?");
 
   for (const fam of TEMPLATE_FAMILIES) {
-    if (find.get(fam.key)) continue; // already seeded — skip (incremental)
-    const templateId = newId();
-    insertTemplate.run(
-      templateId,
-      fam.key,
-      fam.name,
-      fam.description,
-      JSON.stringify(fam.style),
+    const existing = find.get(fam.key) as { id: string } | undefined;
+    let templateId = existing?.id ?? null;
+    if (!templateId) {
+      templateId = newId();
+      insertTemplate.run(
+        templateId,
+        fam.key,
+        fam.name,
+        fam.description,
+        JSON.stringify(fam.style),
+      );
+    }
+
+    // Incremental: add any catalogue layouts the family is missing (e.g. newly
+    // introduced spread layouts) without disturbing existing seeded rows.
+    const have = new Set(
+      (layoutKeysFor.all(templateId) as Array<{ key: string }>).map((r) => r.key),
     );
-    let sortOrder = 0;
+    let sortOrder = (maxSortFor.get(templateId) as { m: number }).m;
     for (const [layoutKey, weight] of fam.layouts) {
+      if (have.has(layoutKey)) continue;
       const layout = LAYOUT_CATALOG[layoutKey];
       if (!layout) continue;
+      sortOrder++;
       insertLayout.run(
         newId(),
         templateId,
@@ -169,7 +200,7 @@ export function seedTemplates(db: DB): void {
         JSON.stringify(layout.slots),
         weight,
         layout.slots.length,
-        sortOrder++,
+        sortOrder,
       );
     }
   }

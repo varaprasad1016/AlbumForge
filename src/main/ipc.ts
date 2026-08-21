@@ -8,7 +8,7 @@ import { analyzeImage, extractTimestamp, generateThumbnails, imageInfo } from ".
 import { buildPdf, ExportPage, PhotoResolver } from "./export";
 import { albumById, generateAndPersist, pageAspect, photoRecordById, photoRecordsFor } from "./generate";
 import { composePage } from "./engine/layoutEngine";
-import { LAYOUT_CATALOG } from "./engine/layouts";
+import { isSpreadLayout, LAYOUT_CATALOG } from "./engine/layouts";
 import { segmentByTime } from "./engine/grouping";
 import { listFonts, readFont } from "./fonts";
 import type {
@@ -81,6 +81,7 @@ function pageDto(db: DB, pageRow: Record<string, unknown>): AlbumPage {
     id: pageRow.id as string,
     index: pageRow.idx as number,
     layoutKey: pageRow.layout_key as string | null,
+    isSpread: isSpreadLayout(pageRow.layout_key as string | null),
     background: pageRow.background ? JSON.parse(pageRow.background as string) : null,
     elements: elements.map((el) => ({
       id: el.id as string,
@@ -469,7 +470,7 @@ export function registerIpc(ctx: IpcContext): void {
     const layout = LAYOUT_CATALOG[layoutKey];
     if (!layout) throw new Error("Unknown layout");
     const album = albumById(db, albumId);
-    const aspect = pageAspect(album.pageSize);
+    const aspect = pageAspect(album.pageSize) * (isSpreadLayout(layoutKey) ? 2 : 1);
 
     const els = db
       .prepare("SELECT photo_id FROM album_elements WHERE page_id = ? ORDER BY z")

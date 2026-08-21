@@ -203,6 +203,65 @@ register({
   ],
 });
 
+// ---- Spread layouts ------------------------------------------------------
+// Spread layouts compose across two facing pages (the open canvas). Slot
+// coordinates are normalized to the full 2-page canvas: x in [0..1] with the
+// center gutter (fold) at x = 0.5. Slot edges that touch x=0 or x=1 (or the
+// top/bottom of the canvas) extend into the outer bleed at export time.
+
+register({
+  key: "spread_hero",
+  name: "Spread — full panorama",
+  weight: 1.0,
+  slots: [{ x: 0, y: 0, w: 1, h: 1, orientationHint: "landscape", bleed: true }],
+});
+
+register({
+  key: "spread_two",
+  name: "Spread — two facing",
+  weight: 1.0,
+  slots: [
+    { x: 0, y: 0, w: 0.47, h: 1, orientationHint: "any", bleed: true },
+    { x: 0.53, y: 0, w: 0.47, h: 1, orientationHint: "any", bleed: true },
+  ],
+});
+
+register({
+  key: "spread_triptych",
+  name: "Spread — hero + two",
+  weight: 0.9,
+  slots: [
+    { x: 0, y: 0, w: 0.5, h: 1, orientationHint: "any", bleed: true },
+    { x: 0.52, y: 0.02, w: 0.48, h: 0.46, orientationHint: "landscape", bleed: false },
+    { x: 0.52, y: 0.52, w: 0.48, h: 0.46, orientationHint: "landscape", bleed: false },
+  ],
+});
+
+register({
+  key: "spread_triptych_mirror",
+  name: "Spread — two + hero",
+  weight: 0.9,
+  slots: [
+    { x: 0.0, y: 0.02, w: 0.48, h: 0.46, orientationHint: "landscape", bleed: false },
+    { x: 0.0, y: 0.52, w: 0.48, h: 0.46, orientationHint: "landscape", bleed: false },
+    { x: 0.5, y: 0, w: 0.5, h: 1, orientationHint: "any", bleed: true },
+  ],
+});
+
+register({
+  key: "spread_grid_four",
+  name: "Spread — four across",
+  weight: 0.8,
+  slots: [
+    ...grid(2, 2, 0.01, 0.02, 0.47, 0.96, 0.02),
+    ...grid(2, 2, 0.52, 0.02, 0.47, 0.96, 0.02),
+  ],
+});
+
 export function layoutKeys(): string[] {
   return Object.keys(LAYOUT_CATALOG);
+}
+
+export function isSpreadLayout(key: string | null | undefined): boolean {
+  return !!key && key.startsWith("spread_");
 }
