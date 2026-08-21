@@ -1,0 +1,35 @@
+appId: com.albumforge.app
+productName: AlbumForge
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**/*
+  - "!**/*.map"
+asarUnpack:
+  - node_modules/sharp/**
+  - node_modules/better-sqlite3/**
+# Auto-update feed (electron-updater). Point this at your release server/repo before
+# enabling auto-update; leave unset for manual distribution.
+# publish:
+#   provider: generic
+#   url: https://updates.example.com/albumforge
+win:
+  target:
+    - nsis
+  executableName: AlbumForge
+  # Skip rcedit/code-signing so packaging works without Windows Developer Mode
+  # (no certificate yet). Re-enable and provide a cert for production.
+  signAndEditExecutable: false
+  # Code signing (provide a cert + password via env: CSC_LINK / CSC_KEY_PASSWORD).
+  # certificateFile: build/cert.pfx
+  # certificatePassword: ${CSC_KEY_PASSWORD}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+mac:
+  category: public.app-category.photography
+  target:
+    - dmg
+  # identity: ${APPLE_IDENTITY}
