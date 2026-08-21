@@ -4,6 +4,7 @@ import { mkdirSync } from "fs";
 import { join } from "path";
 import { pathToFileURL } from "url";
 import { DB, initDatabase } from "./db";
+import { fontPath } from "./fonts";
 import { registerIpc } from "./ipc";
 import { seedTemplates } from "./seed";
 
@@ -44,6 +45,7 @@ function buildMenu(): void {
 
 protocol.registerSchemesAsPrivileged([
   { scheme: "media", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+  { scheme: "font", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
 ]);
 
 let db: DB;
@@ -96,6 +98,15 @@ app.whenReady().then(() => {
     if (kind === "thumb256") p = row?.thumbnail_path ?? null;
     else if (kind === "preview1024") p = row?.preview_path ?? null;
     else if (kind === "original") p = row?.file_path ?? null;
+    if (!p) return new Response("not found", { status: 404 });
+    return net.fetch(pathToFileURL(p).toString());
+  });
+
+  // Serve bundled/user font files to the renderer via `font://font/<family>`.
+  protocol.handle("font", (request) => {
+    const url = new URL(request.url);
+    const family = decodeURIComponent(url.pathname.replace(/^\//, ""));
+    const p = fontPath(family);
     if (!p) return new Response("not found", { status: 404 });
     return net.fetch(pathToFileURL(p).toString());
   });

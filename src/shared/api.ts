@@ -240,6 +240,9 @@ export interface AlbumForgeApi {
     list(): Promise<TemplateSummary[]>;
     get(id: string): Promise<TemplateDetail>;
   };
+  fonts: {
+    list(): Promise<string[]>;
+  };
   albums: {
     list(projectId?: string): Promise<Album[]>;
     get(id: string): Promise<Album>;

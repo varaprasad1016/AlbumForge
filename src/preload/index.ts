@@ -39,6 +39,9 @@ const api: AlbumForgeApi = {
     list: () => ipcRenderer.invoke("templates:list"),
     get: (id) => ipcRenderer.invoke("templates:get", id),
   },
+  fonts: {
+    list: () => ipcRenderer.invoke("fonts:list"),
+  },
   groups: {
     auto: (projectId) => ipcRenderer.invoke("groups:auto", projectId),
     list: (projectId) => ipcRenderer.invoke("groups:list", projectId),

@@ -10,6 +10,7 @@ import { albumById, generateAndPersist, pageAspect, photoRecordById, photoRecord
 import { composePage } from "./engine/layoutEngine";
 import { LAYOUT_CATALOG } from "./engine/layouts";
 import { segmentByTime } from "./engine/grouping";
+import { listFonts, readFont } from "./fonts";
 import type {
   Album,
   AlbumElement,
@@ -392,6 +393,8 @@ export function registerIpc(ctx: IpcContext): void {
   });
 
   // ---- Templates -----------------------------------------------------------
+  ipcMain.handle("fonts:list", () => listFonts().map((f) => f.family));
+
   ipcMain.handle("templates:list", () => {
     const rows = db.prepare("SELECT * FROM templates ORDER BY is_system DESC, name").all();
     return (rows as Array<Record<string, unknown>>).map(templateSummaryDto);
@@ -644,7 +647,16 @@ export function registerIpc(ctx: IpcContext): void {
       }));
 
       const watermark = row.kind === "proof_pdf" ? "PROOF" : undefined;
-      const pdf = await buildPdf(exportPages, resolvePhoto, widthMm, heightMm, settings.dpi, settings.bleedMm, watermark);
+      const pdf = await buildPdf(
+        exportPages,
+        resolvePhoto,
+        widthMm,
+        heightMm,
+        settings.dpi,
+        settings.bleedMm,
+        watermark,
+        (family) => readFont(family),
+      );
       const outPath = targetPath ?? join(dataDir, "exports", `album-${album.id}.pdf`);
       mkdirSync(join(dataDir, "exports"), { recursive: true });
       writeFileSync(outPath, pdf);

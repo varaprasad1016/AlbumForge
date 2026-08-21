@@ -9,6 +9,9 @@ files:
 asarUnpack:
   - node_modules/sharp/**
   - node_modules/better-sqlite3/**
+extraResources:
+  - from: resources/fonts
+    to: fonts
 publish:
   - provider: github
     owner: varaprasad1016

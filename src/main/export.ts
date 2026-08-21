@@ -22,7 +22,7 @@ export interface ExportElement {
   rotation: number;
   crop: { x: number; y: number; width: number; height: number } | null;
   text: { content?: string } | null;
-  style: { color?: string; fontSize?: number } | null;
+  style: { color?: string; fontSize?: number; fontFamily?: string } | null;
   z: number;
 }
 
@@ -107,6 +107,7 @@ export async function buildPdf(
   dpi = 300,
   bleedMm = 3,
   watermark?: string,
+  resolveFont?: (family: string) => Uint8Array | null,
 ): Promise<Uint8Array> {
   const pxPerMm = dpi / MM_PER_INCH;
   const pageWpx = Math.round(widthMm * pxPerMm);
@@ -117,7 +118,8 @@ export async function buildPdf(
   const mediaHmm = heightMm + 2 * bleedMm;
 
   const doc = await PDFDocument.create();
-  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const defaultFont = await doc.embedFont(StandardFonts.Helvetica);
+  const fontCache = new Map<string, import("pdf-lib").PDFFont>();
 
   for (const page of pages) {
     const jpeg = await renderPageJpeg(page, resolvePhoto, pageWpx, pageHpx, bleedPx);
@@ -140,8 +142,18 @@ export async function buildPdf(
       (bleedMm + heightMm) * PT_PER_MM,
     );
 
-    drawTextElements(pdfPage, page, font, widthMm, heightMm, bleedMm);
-    if (watermark) drawWatermark(pdfPage, font, watermark, mediaWmm, mediaHmm);
+    await drawTextElements(
+      doc,
+      pdfPage,
+      page,
+      defaultFont,
+      fontCache,
+      resolveFont ?? (() => null),
+      widthMm,
+      heightMm,
+      bleedMm,
+    );
+    if (watermark) drawWatermark(pdfPage, defaultFont, watermark, mediaWmm, mediaHmm);
   }
 
   return doc.save();
@@ -168,19 +180,44 @@ function drawWatermark(
   });
 }
 
-function drawTextElements(
+async function drawTextElements(
+  doc: import("pdf-lib").PDFDocument,
   pdfPage: import("pdf-lib").PDFPage,
   page: ExportPage,
-  font: import("pdf-lib").PDFFont,
+  defaultFont: import("pdf-lib").PDFFont,
+  fontCache: Map<string, import("pdf-lib").PDFFont>,
+  resolveFont: (family: string) => Uint8Array | null,
   widthMm: number,
   heightMm: number,
   bleedMm: number,
-): void {
+): Promise<void> {
   const pageHpt = (heightMm + 2 * bleedMm) * PT_PER_MM;
   for (const el of page.elements) {
     if (el.type !== "text") continue;
     const content = el.text?.content;
     if (!content) continue;
+
+    const family = (el.style?.fontFamily as string) || "";
+    let font = defaultFont;
+    if (family) {
+      if (fontCache.has(family)) {
+        font = fontCache.get(family)!;
+      } else {
+        const bytes = resolveFont(family);
+        if (bytes) {
+          try {
+            const embedded = await doc.embedFont(bytes, { subset: true });
+            fontCache.set(family, embedded);
+            font = embedded;
+          } catch {
+            fontCache.set(family, defaultFont);
+          }
+        } else {
+          fontCache.set(family, defaultFont);
+        }
+      }
+    }
+
     const fontSize = el.style?.fontSize ?? 18;
     const color = el.style?.color ?? "#000000";
     const x = (bleedMm + el.x * widthMm) * PT_PER_MM;

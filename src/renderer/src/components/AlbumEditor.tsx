@@ -13,6 +13,7 @@ import type Konva from "konva";
 import type { AlbumElement, AlbumPage, PageSize } from "@shared/api";
 import PhotoPicker from "./PhotoPicker";
 import PromptModal from "./PromptModal";
+import { useFonts } from "./useFonts";
 
 const PAGE_W = 600;
 
@@ -69,6 +70,7 @@ export default function AlbumEditor({
 
   const trRef = useRef<Konva.Transformer>(null);
   const nodeRefs = useRef<Record<string, Konva.Group | null>>({});
+  const fonts = useFonts();
 
   // Keep local page state in sync with the prop (pages load asynchronously after mount,
   // and structural changes update the parent list).
@@ -369,6 +371,41 @@ export default function AlbumEditor({
           Add text
         </button>
 
+        {selected?.type === "text" && (
+          <>
+            <select
+              value={(selected.style as { fontFamily?: string } | null)?.fontFamily ?? ""}
+              onChange={(e) =>
+                updateElement(selected.id, {
+                  style: { ...(selected.style ?? {}), fontFamily: e.target.value || undefined },
+                })
+              }
+              className="input !w-auto !px-2 !py-1 text-sm"
+              title="Font"
+            >
+              <option value="">Default font</option>
+              {fonts.map((f) => (
+                <option key={f} value={f} style={{ fontFamily: `'${f}'` }}>
+                  {f}
+                </option>
+              ))}
+            </select>
+            <input
+              type="number"
+              min={8}
+              max={200}
+              value={(selected.style as { fontSize?: number } | null)?.fontSize ?? 28}
+              onChange={(e) =>
+                updateElement(selected.id, {
+                  style: { ...(selected.style ?? {}), fontSize: Number(e.target.value) },
+                })
+              }
+              className="input !w-20 !px-2 !py-1 text-sm"
+              title="Font size"
+            />
+          </>
+        )}
+
         <div className="ml-auto flex gap-2">
           <button onClick={undo} className="btn-secondary !px-3 !py-1">
             Undo
@@ -511,6 +548,7 @@ function ElementNode({
           <KText
             text={content}
             fontSize={(el.style as { fontSize?: number } | null)?.fontSize ?? 28}
+            fontFamily={(el.style as { fontFamily?: string } | null)?.fontFamily || "sans-serif"}
             fill={(el.style as { color?: string } | null)?.color ?? "#000"}
           />
         )}
