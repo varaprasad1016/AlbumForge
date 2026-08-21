@@ -30,6 +30,7 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState<ImportProgress | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [genError, setGenError] = useState("");
   const [prompt, setPrompt] = useState<{ title: string; initial: string; onConfirm: (v: string) => void } | null>(null);
 
   const loadPhotos = useCallback(
@@ -126,8 +127,9 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
       A4: { width: 210, height: 297, unit: "mm" },
     };
     setGenerating(true);
+    setGenError("");
     try {
-      await window.albumforge.albums.generate({
+      const created = await window.albumforge.albums.generate({
         projectId,
         templateId,
         pageCount,
@@ -136,6 +138,9 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
         variations,
       });
       setAlbums(await window.albumforge.albums.list(projectId));
+      if (created.length) setView("albums");
+    } catch (e) {
+      setGenError(e instanceof Error ? e.message : String(e));
     } finally {
       setGenerating(false);
     }
@@ -351,6 +356,7 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
             <button onClick={handleGenerate} disabled={generating} className="btn-primary w-full">
               {generating ? "Generating…" : "Generate albums"}
             </button>
+            {genError && <p className="text-sm text-red-600">{genError}</p>}
           </div>
         </div>
       )}

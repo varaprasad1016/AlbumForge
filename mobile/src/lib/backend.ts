@@ -6,7 +6,7 @@ import { assetUrl, fontUrl, onProgress } from "./backend-helpers";
 import { buildCrudApi } from "./backend-crud";
 import { buildAlbumsApi } from "./backend-albums";
 
-const MOBILE_VERSION = "0.1.1";
+const MOBILE_VERSION = "0.1.2";
 
 async function latestMobileRelease(): Promise<{ html_url: string; version: string } | null> {
   const res = await fetch("https://api.github.com/repos/varaprasad1016/AlbumForge/releases");
