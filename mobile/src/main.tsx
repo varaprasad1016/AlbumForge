@@ -17,8 +17,15 @@ function installErrorOverlay(): void {
       /* ignore */
     }
   };
-  window.addEventListener("error", (e) => show(String(e.message)));
-  window.addEventListener("unhandledrejection", (e) => show(String((e as PromiseRejectionEvent).reason)));
+  window.addEventListener("error", (e) => {
+    const err = (e as ErrorEvent).error as Error | undefined;
+    show(err && err.stack ? err.stack : e.message);
+  });
+  window.addEventListener("unhandledrejection", (e) => {
+    const reason = (e as PromiseRejectionEvent).reason;
+    const msg = reason instanceof Error ? reason.stack || reason.message : String(reason);
+    show(msg);
+  });
 }
 
 function BootError({ message }: { message: string }) {
@@ -42,6 +49,25 @@ function BootError({ message }: { message: string }) {
   );
 }
 
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error("React render error", error);
+  }
+
+  render() {
+    if (this.state.error) {
+      return <BootError message={this.state.error.stack || this.state.error.message} />;
+    }
+    return this.props.children;
+  }
+}
+
 async function boot() {
   installErrorOverlay();
   try {
@@ -58,7 +84,9 @@ async function boot() {
   }
   const root = ReactDOM.createRoot(document.getElementById("root")!);
   root.render(
-    <React.StrictMode>{backendError ? <BootError message={backendError} /> : <App />}</React.StrictMode>,
+    <React.StrictMode>
+      <ErrorBoundary>{backendError ? <BootError message={backendError} /> : <App />}</ErrorBoundary>
+    </React.StrictMode>,
   );
 }
 

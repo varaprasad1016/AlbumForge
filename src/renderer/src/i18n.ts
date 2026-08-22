@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 
 export type Lang = "en" | "fr" | "hi";
 
@@ -244,11 +244,13 @@ export function t(key: string, params?: Record<string, string | number>): string
 }
 
 export function useLang(): Lang {
-  return useSyncExternalStore(
-    (cb) => {
-      listeners.add(cb);
-      return () => listeners.delete(cb);
-    },
-    () => current,
-  );
+  const [lang, setLangState] = useState<Lang>(() => current);
+  useEffect(() => {
+    const cb = () => setLangState(current);
+    listeners.add(cb);
+    return () => {
+      listeners.delete(cb);
+    };
+  }, []);
+  return lang;
 }

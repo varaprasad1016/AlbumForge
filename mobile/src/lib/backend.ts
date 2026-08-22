@@ -46,7 +46,7 @@ export async function initBackend(): Promise<void> {
   try {
     void UpdateInstaller.addListener("downloadProgress", (data) => {
       emitUpdate({ type: "progress", percent: data.percent });
-    });
+    }).catch(() => {});
   } catch {
     /* updater plugin unavailable — updates still checkable via GitHub */
   }

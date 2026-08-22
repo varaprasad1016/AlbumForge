@@ -60,12 +60,12 @@ export default function Nav() {
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
       <div className="flex">
-        {TABS.map((t) => {
-          const active = root === t.key;
+        {TABS.map((tab) => {
+          const active = root === tab.key;
           return (
-            <a key={t.key} href={t.href} className="flex flex-1 flex-col items-center gap-0.5 py-2">
-              <Icon name={t.key} active={active} />
-              <span className={`text-[11px] font-medium ${active ? "text-brand" : "text-slate-400"}`}>{t(t.labelKey)}</span>
+            <a key={tab.key} href={tab.href} className="flex flex-1 flex-col items-center gap-0.5 py-2">
+              <Icon name={tab.key} active={active} />
+              <span className={`text-[11px] font-medium ${active ? "text-brand" : "text-slate-400"}`}>{t(tab.labelKey)}</span>
             </a>
           );
         })}
