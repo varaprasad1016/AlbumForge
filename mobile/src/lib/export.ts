@@ -1,6 +1,7 @@
 /** Export: Canvas-based page compositing + pdf-lib assembly (mobile). */
 import { PDFDocument, StandardFonts, degrees, rgb } from "pdf-lib";
 import { isSpreadLayout } from "./engine/layouts";
+import { patternDataUri } from "./patterns";
 
 const MM_PER_INCH = 25.4;
 const PT_PER_MM = 72 / MM_PER_INCH;
@@ -25,11 +26,38 @@ export interface ExportElement {
 
 export interface ExportPage {
   layoutKey: string | null;
-  background: { color?: string } | null;
+  background: { color?: string; pattern?: string } | null;
   elements: ExportElement[];
 }
 
 export type PhotoResolver = (id: string) => Promise<ResolvedPhoto>;
+
+async function drawBackground(
+  ctx: CanvasRenderingContext2D,
+  background: { color?: string; pattern?: string } | null,
+  width: number,
+  height: number,
+): Promise<void> {
+  ctx.fillStyle = background?.color ?? "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+  const uri = patternDataUri(background?.pattern ?? null);
+  if (!uri) return;
+  try {
+    const img = new Image();
+    img.src = uri;
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => resolve();
+    });
+    const pattern = ctx.createPattern(img, "repeat");
+    if (pattern) {
+      ctx.fillStyle = pattern;
+      ctx.fillRect(0, 0, width, height);
+    }
+  } catch {
+    /* pattern is decorative */
+  }
+}
 
 async function renderPageJpeg(
   page: ExportPage,
@@ -44,8 +72,7 @@ async function renderPageJpeg(
   canvas.width = canvasW;
   canvas.height = canvasH;
   const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = page.background?.color ?? "#ffffff";
-  ctx.fillRect(0, 0, canvasW, canvasH);
+  await drawBackground(ctx, page.background, canvasW, canvasH);
 
   const elements = page.elements.slice().sort((a, b) => a.z - b.z);
   for (const el of elements) {
@@ -114,8 +141,7 @@ async function renderSpreadCanvas(
   canvas.width = canvasW;
   canvas.height = canvasH;
   const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = page.background?.color ?? "#ffffff";
-  ctx.fillRect(0, 0, canvasW, canvasH);
+  await drawBackground(ctx, page.background, canvasW, canvasH);
 
   const elements = page.elements.slice().sort((a, b) => a.z - b.z);
   for (const el of elements) {

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import AlbumEditor from "../components/AlbumEditor";
+import { LAB_PRESETS } from "@shared/api";
 import type { Album, AlbumPage, AlbumVersion, ExportJob } from "@shared/api";
 
 type Tab = "editor" | "versions" | "export";
@@ -16,6 +17,9 @@ export default function AlbumPage({ albumId }: { albumId: string }) {
   const [versions, setVersions] = useState<AlbumVersion[]>([]);
   const [exports, setExports] = useState<ExportJob[]>([]);
   const [layouts, setLayouts] = useState<LayoutOption[]>([]);
+  const [presetId, setPresetId] = useState<string>(LAB_PRESETS[0].id);
+  const [proofInfo, setProofInfo] = useState("");
+  const [notes, setNotes] = useState<Array<{ photoId: string; filename: string; comment: string }>>([]);
 
   async function load() {
     const a = await window.albumforge.albums.get(albumId);
@@ -26,6 +30,7 @@ export default function AlbumPage({ albumId }: { albumId: string }) {
       const t = await window.albumforge.templates.get(a.templateId);
       if (t) setLayouts(t.layouts.map((l) => ({ key: l.key, name: l.name })));
     }
+    setNotes(await window.albumforge.proofs.notes(a.projectId));
   }
 
   useEffect(() => {
@@ -46,12 +51,52 @@ export default function AlbumPage({ albumId }: { albumId: string }) {
     setPages(await window.albumforge.albums.restoreVersion(albumId, versionId));
   }
 
-  async function doExport(kind: string, dpi = 300) {
+  async function doExport(kind: string, dpiOverride?: number) {
     const path = await window.albumforge.dialogs.chooseSavePath(`${album?.name ?? "album"}.pdf`);
     if (!path) return;
-    const job = await window.albumforge.exports.create(albumId, { kind, dpi, bleedMm: 3, targetPath: path });
+    const preset = LAB_PRESETS.find((p) => p.id === presetId) ?? LAB_PRESETS[0];
+    const job = await window.albumforge.exports.create(albumId, {
+      kind,
+      dpi: dpiOverride ?? preset.dpi,
+      bleedMm: preset.bleedMm,
+      colorMode: preset.colorMode,
+      presetId: preset.id,
+      targetPath: path,
+    });
     setExports((prev) => [...prev, job]);
     pollExport(job.id);
+  }
+
+  async function doExportPackage() {
+    const dir = await window.albumforge.dialogs.chooseDirectory();
+    if (!dir) return;
+    const preset = LAB_PRESETS.find((p) => p.id === presetId) ?? LAB_PRESETS[0];
+    const job = await window.albumforge.exports.create(albumId, {
+      kind: "lab_package",
+      dpi: preset.dpi,
+      bleedMm: preset.bleedMm,
+      colorMode: preset.colorMode,
+      presetId: preset.id,
+      targetPath: dir,
+    });
+    setExports((prev) => [...prev, job]);
+    pollExport(job.id);
+  }
+
+  async function exportProofGallery() {
+    const dir = await window.albumforge.dialogs.chooseDirectory();
+    if (!dir) return;
+    const res = await window.albumforge.proofs.build(albumId, dir);
+    setProofInfo(`Proof gallery ready: ${res.dir} (${res.photos} photos). Send the folder to your client.`);
+  }
+
+  async function importClientFeedback() {
+    if (!album) return;
+    const file = await window.albumforge.dialogs.chooseFeedback();
+    if (!file) return;
+    const res = await window.albumforge.proofs.importFeedback(album.projectId, file);
+    setProofInfo(`Feedback imported: ${res.favorited} favourites selected, ${res.commented} comments saved.`);
+    setNotes(await window.albumforge.proofs.notes(album.projectId));
   }
 
   async function pollExport(exportId: string) {
@@ -117,16 +162,59 @@ export default function AlbumPage({ albumId }: { albumId: string }) {
 
       {tab === "export" && (
         <div className="space-y-4">
-          <div className="flex gap-2">
-            <button onClick={() => doExport("proof_pdf", 150)} className="btn-secondary">
+          <div className="card max-w-xl p-4">
+            <label className="field-label">Lab preset</label>
+            <select value={presetId} onChange={(e) => setPresetId(e.target.value)} className="input">
+              {LAB_PRESETS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} — {p.dpi} DPI · {p.bleedMm} mm bleed · {p.colorMode.toUpperCase()}
+                </option>
+              ))}
+            </select>
+            <p className="mt-2 text-xs text-slate-400">
+              {LAB_PRESETS.find((p) => p.id === presetId)?.description}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => doExport("proof_pdf")} className="btn-secondary">
               Proof PDF (watermarked)
             </button>
             <button onClick={() => doExport("preview_pdf")} className="btn-secondary">
               Preview PDF
             </button>
             <button onClick={() => doExport("highres_pdf")} className="btn-primary">
-              High-res PDF (300 DPI)
+              High-res PDF
             </button>
+            <button onClick={doExportPackage} className="btn-primary">
+              Export lab package
+            </button>
+          </div>
+
+          <div className="card max-w-xl p-4">
+            <h3 className="font-semibold">Client proofing</h3>
+            <p className="mt-1 text-xs text-slate-400">
+              Export a self-contained proof gallery your client can open in any browser, mark favourites
+              and leave comments — then import their feedback.json back here.
+            </p>
+            <div className="mt-3 flex gap-2">
+              <button onClick={exportProofGallery} className="btn-secondary">
+                Export proof gallery
+              </button>
+              <button onClick={importClientFeedback} className="btn-primary">
+                Import client feedback
+              </button>
+            </div>
+            {proofInfo && <p className="mt-2 text-sm text-emerald-600">{proofInfo}</p>}
+            {notes.length > 0 && (
+              <ul className="mt-3 space-y-1.5 border-t border-slate-100 pt-3">
+                {notes.map((n) => (
+                  <li key={n.photoId} className="text-sm">
+                    <span className="font-medium text-slate-600">{n.filename}</span>
+                    <span className="text-slate-400"> — {n.comment}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
           <ul className="space-y-2">
             {exports.map((e) => (

@@ -65,6 +65,7 @@ export function familyFor(db: DB, templateId: string): TemplateFamily {
     bleed: (style.bleed as number) ?? 0,
     safeArea: (style.safeArea as number) ?? 0.05,
     background: (style.background as string) ?? "#ffffff",
+    pattern: (style.pattern as string) ?? undefined,
   };
   return {
     key: t.key as string,
@@ -84,6 +85,7 @@ export function persistAlbum(
   variation: number,
   result: ReturnType<typeof generateAlbum>,
   background = "#ffffff",
+  pattern?: string,
 ): string {
   const albumId = newId();
   db.prepare(
@@ -112,7 +114,7 @@ export function persistAlbum(
   for (let i = 0; i < result.pages.length; i++) {
     const page = result.pages[i];
     const pageId = newId();
-    insertPage.run(pageId, albumId, i, page.layoutKey, JSON.stringify({ color: background }));
+    insertPage.run(pageId, albumId, i, page.layoutKey, JSON.stringify({ color: background, pattern: pattern ?? null }));
     for (const el of page.elements) {
       insertElement.run(
         newId(),
@@ -165,6 +167,7 @@ export function generateAndPersist(db: DB, input: GenerateInput): string[] {
         v,
         result,
         family.style.background ?? "#ffffff",
+        family.style.pattern,
       ),
     );
   }

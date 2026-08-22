@@ -87,7 +87,15 @@ export function buildCrudApi(): any {
         await persistDb();
         return { imported, failed };
       },
-      list: async (projectId: string, opts: { offset: number; limit: number; selected?: boolean; status?: string; groupId?: string }) => {
+      list: async (projectId: string, opts: {
+        offset: number;
+        limit: number;
+        selected?: boolean;
+        status?: string;
+        groupId?: string;
+        query?: string;
+        sort?: "created" | "captured";
+      }) => {
         let where = "WHERE project_id = ?";
         const args: any[] = [projectId];
         if (opts.selected != null) {
@@ -99,8 +107,14 @@ export function buildCrudApi(): any {
           where += " AND group_id = ?";
           args.push(opts.groupId);
         }
+        if (opts.query && opts.query.trim()) {
+          where += " AND filename LIKE ?";
+          args.push(`%${opts.query.trim()}%`);
+        }
+        const orderBy =
+          opts.sort === "captured" ? "ORDER BY exif_timestamp IS NULL, exif_timestamp" : "ORDER BY created_at";
         const total = (get(`SELECT COUNT(*) AS c FROM photos ${where}`, args)?.c as number) ?? 0;
-        const rows = all(`SELECT * FROM photos ${where} ORDER BY created_at LIMIT ? OFFSET ?`, [...args, opts.limit, opts.offset]);
+        const rows = all(`SELECT * FROM photos ${where} ${orderBy} LIMIT ? OFFSET ?`, [...args, opts.limit, opts.offset]);
         return { items: rows.map(photoDto), total };
       },
       setSelected: async (photoId: string, selected: boolean) => {

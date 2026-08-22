@@ -143,6 +143,50 @@ export interface ExportJob {
   createdAt: string;
 }
 
+export interface LabPreset {
+  id: string;
+  name: string;
+  description: string;
+  dpi: number;
+  bleedMm: number;
+  colorMode: "rgb" | "cmyk";
+}
+
+export const LAB_PRESETS: LabPreset[] = [
+  {
+    id: "silver_rgb",
+    name: "Silver-halide lab (RGB)",
+    description: "300 DPI RGB — the standard profile for silver-halide flush-mount labs.",
+    dpi: 300,
+    bleedMm: 3,
+    colorMode: "rgb",
+  },
+  {
+    id: "cmyk_press",
+    name: "Offset press (CMYK)",
+    description: "300 DPI for press labs — CMYK conversion note included in the package manifest.",
+    dpi: 300,
+    bleedMm: 3,
+    colorMode: "cmyk",
+  },
+  {
+    id: "flush_square",
+    name: "Flush-mount (2 mm bleed)",
+    description: "300 DPI with tight 2 mm bleed for square flush-mount books.",
+    dpi: 300,
+    bleedMm: 2,
+    colorMode: "rgb",
+  },
+  {
+    id: "quick_proof",
+    name: "Quick proof",
+    description: "150 DPI draft for fast client review.",
+    dpi: 150,
+    bleedMm: 0,
+    colorMode: "rgb",
+  },
+];
+
 export interface AppInfo {
   version: string;
   author: string;
@@ -218,6 +262,8 @@ export interface AlbumForgeApi {
   dialogs: {
     chooseImages(): Promise<string[] | null>;
     chooseSavePath(defaultName: string): Promise<string | null>;
+    chooseDirectory(): Promise<string | null>;
+    chooseFeedback(): Promise<string | null>;
   };
   projects: {
     list(): Promise<Project[]>;
@@ -230,7 +276,15 @@ export interface AlbumForgeApi {
     importPhotos(projectId: string, paths: string[]): Promise<ImportResult>;
     list(
       projectId: string,
-      opts: { offset: number; limit: number; selected?: boolean; status?: string; groupId?: string },
+      opts: {
+        offset: number;
+        limit: number;
+        selected?: boolean;
+        status?: string;
+        groupId?: string;
+        query?: string;
+        sort?: "created" | "captured";
+      },
     ): Promise<{ items: Photo[]; total: number }>;
     geo(projectId: string): Promise<GeoPoint[]>;
     setSelected(photoId: string, selected: boolean): Promise<void>;
@@ -273,8 +327,23 @@ export interface AlbumForgeApi {
   exports: {
     create(
       albumId: string,
-      input: { kind: string; dpi: number; bleedMm: number; targetPath?: string | null },
+      input: {
+        kind: string;
+        dpi: number;
+        bleedMm: number;
+        colorMode?: "rgb" | "cmyk";
+        presetId?: string | null;
+        targetPath?: string | null;
+      },
     ): Promise<ExportJob>;
     get(id: string): Promise<ExportJob>;
+  };
+  proofs: {
+    build(albumId: string, targetDir: string): Promise<{ dir: string; photos: number }>;
+    importFeedback(
+      projectId: string,
+      filePath: string,
+    ): Promise<{ favorited: number; commented: number }>;
+    notes(projectId: string): Promise<Array<{ photoId: string; filename: string; comment: string }>>;
   };
 }

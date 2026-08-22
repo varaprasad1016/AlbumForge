@@ -102,7 +102,7 @@ export const TEMPLATE_FAMILIES: TemplateFamilySeed[] = [
     name: "Royal",
     key: "royal",
     description: "Elegant ivory spreads with generous whitespace — a timeless wedding look.",
-    style: { margin: 0.035, gutter: 0.035, safeArea: 0.055, chronological: true, background: "#faf6ec" },
+    style: { margin: 0.035, gutter: 0.035, safeArea: 0.055, chronological: true, background: "#faf6ec", pattern: "damask" },
     layouts: [
       ["full_bleed", 0.6],
       ["hero_top", 1.0],
@@ -120,7 +120,7 @@ export const TEMPLATE_FAMILIES: TemplateFamilySeed[] = [
     name: "Heritage",
     key: "heritage",
     description: "Traditional warm-toned layouts — classic Indian wedding storytelling.",
-    style: { margin: 0.03, gutter: 0.03, safeArea: 0.05, chronological: true, background: "#fbf1dd" },
+    style: { margin: 0.03, gutter: 0.03, safeArea: 0.05, chronological: true, background: "#fbf1dd", pattern: "damask" },
     layouts: [
       ["full_bleed", 0.7],
       ["hero_top", 1.0],
@@ -156,7 +156,7 @@ export const TEMPLATE_FAMILIES: TemplateFamilySeed[] = [
     name: "Boho Chic",
     key: "boho",
     description: "Free-spirited, artisanal palettes with organic energy.",
-    style: { margin: 0.03, gutter: 0.03, safeArea: 0.05, chronological: false, background: "#fdf3e7" },
+    style: { margin: 0.03, gutter: 0.03, safeArea: 0.05, chronological: false, background: "#fdf3e7", pattern: "dots" },
     layouts: [
       ["full_bleed", 0.8],
       ["hero_left", 0.9],
@@ -174,7 +174,7 @@ export const TEMPLATE_FAMILIES: TemplateFamilySeed[] = [
     name: "Vintage Film",
     key: "vintage_film",
     description: "Silver-era film aesthetic with warm grain tones.",
-    style: { margin: 0.035, gutter: 0.035, safeArea: 0.055, chronological: true, background: "#f6f1e7" },
+    style: { margin: 0.035, gutter: 0.035, safeArea: 0.055, chronological: true, background: "#f6f1e7", pattern: "diag" },
     layouts: [
       ["full_bleed", 0.9],
       ["hero_left", 1.0],
@@ -207,7 +207,7 @@ export const TEMPLATE_FAMILIES: TemplateFamilySeed[] = [
     name: "Zen Nature",
     key: "zen_nature",
     description: "Calm organic layouts with breathing room.",
-    style: { margin: 0.045, gutter: 0.04, safeArea: 0.06, chronological: true, background: "#f2f7f0" },
+    style: { margin: 0.045, gutter: 0.04, safeArea: 0.06, chronological: true, background: "#f2f7f0", pattern: "grid" },
     layouts: [
       ["full_bleed", 0.8],
       ["hero_left", 0.9],
@@ -223,7 +223,7 @@ export const TEMPLATE_FAMILIES: TemplateFamilySeed[] = [
     name: "Party Mode",
     key: "party",
     description: "Festive, colorful collages for celebrations.",
-    style: { margin: 0.02, gutter: 0.02, safeArea: 0.04, chronological: false, background: "#fff1f5" },
+    style: { margin: 0.02, gutter: 0.02, safeArea: 0.04, chronological: false, background: "#fff1f5", pattern: "dots" },
     layouts: [
       ["four_grid", 1.0],
       ["six_collage", 1.2],
@@ -239,7 +239,7 @@ export const TEMPLATE_FAMILIES: TemplateFamilySeed[] = [
     name: "Love Letters",
     key: "love_letters",
     description: "Soft, romantic layouts for weddings and anniversaries.",
-    style: { margin: 0.035, gutter: 0.035, safeArea: 0.055, chronological: true, background: "#fdf0f0" },
+    style: { margin: 0.035, gutter: 0.035, safeArea: 0.055, chronological: true, background: "#fdf0f0", pattern: "dots" },
     layouts: [
       ["full_bleed", 0.8],
       ["hero_left", 1.0],
@@ -278,6 +278,14 @@ export function seedTemplates(db: DB): void {
         fam.name,
         fam.description,
         JSON.stringify(fam.style),
+      );
+    } else {
+      // Keep system template style/description fresh across app updates.
+      db.prepare("UPDATE templates SET name = ?, description = ?, style = ? WHERE id = ?").run(
+        fam.name,
+        fam.description,
+        JSON.stringify(fam.style),
+        templateId,
       );
     }
 

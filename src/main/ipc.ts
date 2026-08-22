@@ -5,7 +5,8 @@ import { mkdirSync, rmSync, statSync, writeFileSync } from "fs";
 import { basename, extname, join } from "path";
 import { DB, newId, now } from "./db";
 import { analyzeImage, extractGps, extractTimestamp, generateThumbnails, imageInfo } from "./imaging";
-import { buildPdf, ExportPage, PhotoResolver } from "./export";
+import { buildPdf, ExportPage, PhotoResolver, writeLabPackage } from "./export";
+import { buildProofGallery, importFeedback, photoNotes } from "./proofing";
 import { albumById, generateAndPersist, pageAspect, photoRecordById, photoRecordsFor } from "./generate";
 import { composePage } from "./engine/layoutEngine";
 import { isSpreadLayout, LAYOUT_CATALOG } from "./engine/layouts";
@@ -190,6 +191,36 @@ export function registerIpc(ctx: IpcContext): void {
     return res.canceled ? null : res.filePath;
   });
 
+  ipcMain.handle("dialogs:chooseDirectory", async () => {
+    const win = getWindow();
+    const res = await dialog.showOpenDialog(win!, {
+      properties: ["openDirectory", "createDirectory"],
+    });
+    return res.canceled ? null : (res.filePaths[0] ?? null);
+  });
+
+  ipcMain.handle("dialogs:chooseFeedback", async () => {
+    const win = getWindow();
+    const res = await dialog.showOpenDialog(win!, {
+      properties: ["openFile"],
+      filters: [{ name: "Feedback", extensions: ["json"] }],
+    });
+    return res.canceled ? null : (res.filePaths[0] ?? null);
+  });
+
+  // ---- Client proofing -----------------------------------------------------
+  ipcMain.handle("proofs:build", (_e, albumId: string, targetDir: string) => {
+    return buildProofGallery(db, albumId, targetDir);
+  });
+
+  ipcMain.handle("proofs:importFeedback", (_e, projectId: string, filePath: string) => {
+    return importFeedback(db, projectId, filePath);
+  });
+
+  ipcMain.handle("proofs:notes", (_e, projectId: string) => {
+    return photoNotes(db, projectId);
+  });
+
   // ---- Projects ------------------------------------------------------------
   ipcMain.handle("projects:list", () => {
     const rows = db.prepare("SELECT * FROM projects ORDER BY created_at DESC").all() as Array<
@@ -299,7 +330,15 @@ export function registerIpc(ctx: IpcContext): void {
 
   ipcMain.handle(
     "photos:list",
-    (_e, projectId: string, opts: { offset: number; limit: number; selected?: boolean; status?: string; groupId?: string }) => {
+    (_e, projectId: string, opts: {
+      offset: number;
+      limit: number;
+      selected?: boolean;
+      status?: string;
+      groupId?: string;
+      query?: string;
+      sort?: "created" | "captured";
+    }) => {
       let where = "WHERE project_id = ?";
       const args: unknown[] = [projectId];
       if (opts.selected != null) {
@@ -316,9 +355,15 @@ export function registerIpc(ctx: IpcContext): void {
         where += " AND group_id = ?";
         args.push(opts.groupId);
       }
+      if (opts.query && opts.query.trim()) {
+        where += " AND filename LIKE ?";
+        args.push(`%${opts.query.trim()}%`);
+      }
+      const orderBy =
+        opts.sort === "captured" ? "ORDER BY exif_timestamp IS NULL, exif_timestamp" : "ORDER BY created_at";
       const total = (db.prepare(`SELECT COUNT(*) AS c FROM photos ${where}`).get(...args) as { c: number }).c;
       const rows = db
-        .prepare(`SELECT * FROM photos ${where} ORDER BY created_at LIMIT ? OFFSET ?`)
+        .prepare(`SELECT * FROM photos ${where} ${orderBy} LIMIT ? OFFSET ?`)
         .all(...args, opts.limit, opts.offset);
       return { items: (rows as Array<Record<string, unknown>>).map(photoDto), total };
     },
@@ -631,14 +676,32 @@ export function registerIpc(ctx: IpcContext): void {
   });
 
   // ---- Exports -------------------------------------------------------------
-  ipcMain.handle("exports:create", (_e, albumId: string, input: { kind: string; dpi: number; bleedMm: number; targetPath?: string }) => {
-    const id = newId();
-    db.prepare(
-      "INSERT INTO exports (id, album_id, kind, status, settings, created_at) VALUES (?, ?, ?, 'queued', ?, ?)",
-    ).run(id, albumId, input.kind, JSON.stringify({ dpi: input.dpi, bleedMm: input.bleedMm }), now());
-    void runExport(id, input.targetPath ?? null);
-    return exportJobDto(id);
-  });
+  ipcMain.handle(
+    "exports:create",
+    (
+      _e,
+      albumId: string,
+      input: { kind: string; dpi: number; bleedMm: number; colorMode?: "rgb" | "cmyk"; presetId?: string; targetPath?: string },
+    ) => {
+      const id = newId();
+      db.prepare(
+        "INSERT INTO exports (id, album_id, kind, status, settings, created_at) VALUES (?, ?, ?, 'queued', ?, ?)",
+      ).run(
+        id,
+        albumId,
+        input.kind,
+        JSON.stringify({
+          dpi: input.dpi,
+          bleedMm: input.bleedMm,
+          colorMode: input.colorMode ?? "rgb",
+          presetId: input.presetId ?? null,
+        }),
+        now(),
+      );
+      void runExport(id, input.targetPath ?? null);
+      return exportJobDto(id);
+    },
+  );
 
   ipcMain.handle("exports:get", (_e, id: string) => exportJobDto(id));
 
@@ -660,7 +723,11 @@ export function registerIpc(ctx: IpcContext): void {
       const row = db.prepare("SELECT * FROM exports WHERE id = ?").get(exportId) as Record<string, unknown>;
       const album = albumById(db, row.album_id as string);
       const pages = albumPages(db, row.album_id as string);
-      const settings = JSON.parse(row.settings as string) as { dpi: number; bleedMm: number };
+      const settings = JSON.parse(row.settings as string) as {
+        dpi: number;
+        bleedMm: number;
+        colorMode?: "rgb" | "cmyk";
+      };
 
       const resolvePhoto: PhotoResolver = (photoId) => {
         const p = db.prepare("SELECT file_path, width, height FROM photos WHERE id = ?").get(photoId) as {
@@ -679,7 +746,7 @@ export function registerIpc(ctx: IpcContext): void {
 
       const exportPages: ExportPage[] = pages.map((p) => ({
         layoutKey: p.layoutKey,
-        background: p.background as { color?: string } | null,
+        background: p.background as { color?: string; pattern?: string } | null,
         elements: p.elements.map((el) => ({
           type: el.type,
           photoId: el.photoId,
@@ -696,6 +763,26 @@ export function registerIpc(ctx: IpcContext): void {
       }));
 
       const watermark = row.kind === "proof_pdf" ? "PROOF" : undefined;
+      const colorMode = settings.colorMode ?? "rgb";
+
+      if (row.kind === "lab_package") {
+        if (!targetPath) throw new Error("Choose a destination folder for the lab package.");
+        const outPath = await writeLabPackage(
+          exportPages,
+          resolvePhoto,
+          widthMm,
+          heightMm,
+          settings.dpi,
+          settings.bleedMm,
+          colorMode,
+          targetPath,
+          album.name,
+          (family) => readFont(family),
+        );
+        db.prepare("UPDATE exports SET status = 'completed', file_path = ? WHERE id = ?").run(outPath, exportId);
+        return;
+      }
+
       const pdf = await buildPdf(
         exportPages,
         resolvePhoto,

@@ -150,6 +150,13 @@ CREATE TABLE IF NOT EXISTS exports (
   error TEXT,
   created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS photo_notes (
+  id TEXT PRIMARY KEY,
+  photo_id TEXT NOT NULL UNIQUE,
+  comment TEXT,
+  created_at TEXT NOT NULL
+);
 `;
 
 export function initDatabase(dbPath: string): DB {

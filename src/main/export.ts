@@ -2,7 +2,10 @@
  * with pdf-lib (correct physical size + trim/bleed/media boxes). */
 import sharp from "sharp";
 import { PDFDocument, StandardFonts, degrees, rgb } from "pdf-lib";
+import { mkdirSync, writeFileSync } from "fs";
+import { join } from "path";
 import { isSpreadLayout } from "./engine/layouts";
+import { backgroundCanvasSvg } from "../shared/patterns";
 
 const MM_PER_INCH = 25.4;
 const PT_PER_MM = 72 / MM_PER_INCH;
@@ -29,7 +32,7 @@ export interface ExportElement {
 
 export interface ExportPage {
   layoutKey: string | null;
-  background: { color?: string } | null;
+  background: { color?: string; pattern?: string } | null;
   elements: ExportElement[];
 }
 
@@ -94,14 +97,19 @@ export async function renderPageJpeg(
     composites.push({ input: buf, left: Math.round(left), top: Math.round(top) });
   }
 
-  return sharp({
-    create: {
-      width: canvasW,
-      height: canvasH,
-      channels: 3,
-      background: hexToRgb(bgHex),
-    },
-  })
+  // Base canvas: pattern (SVG raster) when a pattern is set, plain fill otherwise.
+  const patternSvg = backgroundCanvasSvg(page.background?.pattern ?? null, bgHex, canvasW, canvasH);
+  const base = patternSvg
+    ? sharp(Buffer.from(patternSvg))
+    : sharp({
+        create: {
+          width: canvasW,
+          height: canvasH,
+          channels: 3,
+          background: hexToRgb(bgHex),
+        },
+      });
+  return base
     .composite(composites)
     .jpeg({ quality: 95 })
     .toBuffer();
@@ -163,14 +171,18 @@ export async function renderSpreadJpegs(
     composites.push({ input: buf, left: Math.round(left), top: Math.round(top) });
   }
 
-  const canvas = await sharp({
-    create: {
-      width: canvasW,
-      height: canvasH,
-      channels: 3,
-      background: hexToRgb(bgHex),
-    },
-  })
+  const patternSvg = backgroundCanvasSvg(page.background?.pattern ?? null, bgHex, canvasW, canvasH);
+  const base = patternSvg
+    ? sharp(Buffer.from(patternSvg))
+    : sharp({
+        create: {
+          width: canvasW,
+          height: canvasH,
+          channels: 3,
+          background: hexToRgb(bgHex),
+        },
+      });
+  const canvas = await base
     .composite(composites)
     .jpeg({ quality: 95 })
     .toBuffer();
@@ -185,6 +197,73 @@ export async function renderSpreadJpegs(
     .jpeg({ quality: 95 })
     .toBuffer();
   return [leftJpeg, rightJpeg];
+}
+
+/** Build a complete lab-ready package: print PDF + one JPEG per page + a manifest
+ * describing the exact print specs. Everything a print lab needs to check the job. */
+export async function writeLabPackage(
+  pages: ExportPage[],
+  resolvePhoto: PhotoResolver,
+  widthMm: number,
+  heightMm: number,
+  dpi: number,
+  bleedMm: number,
+  colorMode: "rgb" | "cmyk",
+  outDir: string,
+  albumName: string,
+  resolveFont?: (family: string) => Uint8Array | null,
+): Promise<string> {
+  mkdirSync(outDir, { recursive: true });
+  mkdirSync(join(outDir, "pages"), { recursive: true });
+
+  const pdf = await buildPdf(
+    pages,
+    resolvePhoto,
+    widthMm,
+    heightMm,
+    dpi,
+    bleedMm,
+    undefined,
+    resolveFont,
+  );
+  writeFileSync(join(outDir, `${albumName}.pdf`), pdf);
+
+  const pxPerMm = dpi / MM_PER_INCH;
+  const pageWpx = Math.round(widthMm * pxPerMm);
+  const pageHpx = Math.round(heightMm * pxPerMm);
+  const bleedPx = Math.round(bleedMm * pxPerMm);
+
+  let pageNo = 0;
+  for (const page of pages) {
+    pageNo++;
+    if (isSpreadLayout(page.layoutKey)) {
+      const [left, right] = await renderSpreadJpegs(page, resolvePhoto, pageWpx, pageHpx, bleedPx);
+      writeFileSync(join(outDir, "pages", `page-${String(pageNo).padStart(3, "0")}-left.jpg`), left);
+      writeFileSync(join(outDir, "pages", `page-${String(pageNo).padStart(3, "0")}-right.jpg`), right);
+    } else {
+      const jpeg = await renderPageJpeg(page, resolvePhoto, pageWpx, pageHpx, bleedPx);
+      writeFileSync(join(outDir, "pages", `page-${String(pageNo).padStart(3, "0")}.jpg`), jpeg);
+    }
+  }
+
+  const manifest = [
+    `AlbumForge lab package`,
+    `Album: ${albumName}`,
+    `Size: ${widthMm} x ${heightMm} mm (${Math.round((widthMm / 25.4) * 100) / 100} x ${Math.round((heightMm / 25.4) * 100) / 100} in)`,
+    `Resolution: ${dpi} DPI`,
+    `Bleed: ${bleedMm} mm per side`,
+    `Color mode: ${colorMode.toUpperCase()}`,
+    `Pages: ${pages.length} (spreads exported as left/right files)`,
+    ``,
+    colorMode === "cmyk"
+      ? "NOTE: Files are delivered in sRGB JPEG; the PDF is RGB. Perform CMYK conversion with your press profile (G7/ISO Coated) before plating. Safe zones are respected — no faces or text cross the gutter."
+      : "NOTE: Deliver as-is to silver-halide/lab systems. RGB profile preserved.",
+    ``,
+    `Generated: ${new Date().toISOString()}`,
+  ].join("\n");
+  writeFileSync(join(outDir, "manifest.txt"), manifest);
+
+  return outDir;
 }
 
 export async function buildPdf(

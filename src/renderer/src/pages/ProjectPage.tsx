@@ -21,6 +21,9 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
   const [albums, setAlbums] = useState<Album[]>([]);
 
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<"created" | "captured">("created");
+
   const [templateId, setTemplateId] = useState("");
   const [pageSize, setPageSize] = useState("12x12");
   const [pageCount, setPageCount] = useState(20);
@@ -39,13 +42,15 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
         offset: off,
         limit: PAGE_LIMIT,
         groupId: activeGroupId ?? undefined,
+        query: query || undefined,
+        sort,
       });
       setPhotos(reset ? res.items : (prev) => [...prev, ...res.items]);
       setTotal(res.total);
       setHasMore(off + res.items.length < res.total);
       setOffset(off + res.items.length);
     },
-    [projectId, offset, activeGroupId],
+    [projectId, offset, activeGroupId, query, sort],
   );
 
   const loadGroups = useCallback(async () => {
@@ -274,15 +279,39 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
       )}
 
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
-        <PhotoGallery
-          photos={photos}
-          selected={selected}
-          onToggle={togglePhoto}
-          onDelete={deletePhoto}
-          onSetThumbnail={setThumbnail}
-          onLoadMore={() => loadPhotos(false)}
-          hasMore={hasMore}
-        />
+        <div>
+          <div className="mb-2 flex items-center gap-2">
+            <input
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                void loadPhotos(true);
+              }}
+              placeholder="Search photos by name…"
+              className="input !w-64 !py-1.5 text-sm"
+            />
+            <select
+              value={sort}
+              onChange={(e) => {
+                setSort(e.target.value as "created" | "captured");
+                void loadPhotos(true);
+              }}
+              className="input !w-44 !py-1.5 text-sm"
+            >
+              <option value="created">Import order</option>
+              <option value="captured">Timeline (capture date)</option>
+            </select>
+          </div>
+          <PhotoGallery
+            photos={photos}
+            selected={selected}
+            onToggle={togglePhoto}
+            onDelete={deletePhoto}
+            onSetThumbnail={setThumbnail}
+            onLoadMore={() => loadPhotos(false)}
+            hasMore={hasMore}
+          />
+        </div>
 
         <aside className="space-y-6">
           <section className="card p-4">

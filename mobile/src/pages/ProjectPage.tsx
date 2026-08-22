@@ -19,6 +19,9 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
   const [groups, setGroups] = useState<PhotoGroup[]>([]);
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
 
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<"created" | "captured">("created");
+
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
   const [albums, setAlbums] = useState<Album[]>([]);
 
@@ -43,13 +46,15 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
         offset: off,
         limit: PAGE_LIMIT,
         groupId: activeGroupId ?? undefined,
+        query: query || undefined,
+        sort,
       });
       setPhotos(reset ? res.items : (prev) => [...prev, ...res.items]);
       setTotal(res.total);
       setHasMore(off + res.items.length < res.total);
       setOffset(off + res.items.length);
     },
-    [projectId, offset, activeGroupId],
+    [projectId, offset, activeGroupId, query, sort],
   );
 
   const loadGroups = useCallback(async () => {
@@ -275,6 +280,28 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
 
       {view === "photos" && (
         <>
+          <div className="mb-2 flex items-center gap-2">
+            <input
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                void loadPhotos(true);
+              }}
+              placeholder="Search photos…"
+              className="input !py-1.5 text-sm"
+            />
+            <select
+              value={sort}
+              onChange={(e) => {
+                setSort(e.target.value as "created" | "captured");
+                void loadPhotos(true);
+              }}
+              className="input !w-36 !py-1.5 text-sm"
+            >
+              <option value="created">Import order</option>
+              <option value="captured">Timeline</option>
+            </select>
+          </div>
           {selected.size > 0 && (
             <div className="mb-2 flex flex-wrap gap-2">
               {selected.size === 1 && (

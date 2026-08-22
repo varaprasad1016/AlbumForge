@@ -11,6 +11,7 @@ import {
 } from "react-konva";
 import type Konva from "konva";
 import type { AlbumElement, AlbumPage, PageSize } from "@shared/api";
+import { PAGE_PATTERNS, patternDataUri } from "@shared/patterns";
 import PhotoPicker from "./PhotoPicker";
 import PromptModal from "./PromptModal";
 import { useFonts } from "./useFonts";
@@ -80,7 +81,10 @@ export default function AlbumEditor({
   const page = pagesState[pageIndex];
   const elements = page?.elements ?? [];
   const selected = elements.find((e) => e.id === selectedId);
-  const background = (page?.background as { color?: string } | null)?.color ?? "#ffffff";
+  const bg = (page?.background as { color?: string; pattern?: string } | null) ?? {};
+  const bgColor = bg.color ?? "#ffffff";
+  const bgPattern = bg.pattern ?? null;
+  const patternImg = useLoadedImage(patternDataUri(bgPattern) ?? undefined);
   const spread = page?.isSpread ?? false;
   const canvasW = spread ? PAGE_W * 2 : PAGE_W;
 
@@ -215,7 +219,13 @@ export default function AlbumEditor({
   }
 
   function setBackground(color: string) {
-    const p = { ...page, background: { color } };
+    const p = { ...page, background: { color, pattern: bgPattern } };
+    setPagesState((prev) => prev.map((x) => (x.id === p.id ? p : x)));
+    void persist(pagesState.map((x) => (x.id === p.id ? p : x)));
+  }
+
+  function setPattern(patternId: string) {
+    const p = { ...page, background: { color: bgColor, pattern: patternId || null } };
     setPagesState((prev) => prev.map((x) => (x.id === p.id ? p : x)));
     void persist(pagesState.map((x) => (x.id === p.id ? p : x)));
   }
@@ -349,11 +359,25 @@ export default function AlbumEditor({
           Background
           <input
             type="color"
-            value={background}
+            value={bgColor}
             onChange={(e) => setBackground(e.target.value)}
             className="h-6 w-8 cursor-pointer rounded border border-slate-300"
           />
         </label>
+
+        <select
+          value={bgPattern ?? ""}
+          onChange={(e) => setPattern(e.target.value)}
+          className="input !w-auto !px-2 !py-1 text-sm"
+          title="Page pattern"
+        >
+          <option value="">No pattern</option>
+          {PAGE_PATTERNS.map((p) => (
+            <option key={p.id} value={p.id}>
+              Pattern: {p.name}
+            </option>
+          ))}
+        </select>
 
         <button onClick={() => setPicker("add")} className="btn-secondary !px-3 !py-1">
           Add photo
@@ -428,10 +452,21 @@ export default function AlbumEditor({
               y={40}
               width={canvasW}
               height={PAGE_H}
-              fill={background}
+              fill={bgColor}
               stroke="#ccc"
               onClick={() => setSelectedId(null)}
             />
+            {patternImg && (
+              <Rect
+                x={40}
+                y={40}
+                width={canvasW}
+                height={PAGE_H}
+                fillPatternImage={patternImg}
+                fillPatternRepeat="repeat"
+                listening={false}
+              />
+            )}
             <Line
               points={[
                 40 + safeInset, 40 + safeInset,

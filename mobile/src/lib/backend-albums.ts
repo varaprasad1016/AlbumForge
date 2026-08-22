@@ -157,7 +157,7 @@ export function buildAlbumsApi(): any {
     exports: {
       create: async (albumId: string, input: { kind: string; dpi: number; bleedMm: number; targetPath?: string | null }) => {
         const id = newId();
-        run("INSERT INTO exports (id, album_id, kind, status, settings, created_at) VALUES (?, ?, ?, 'queued', ?, ?)", [id, albumId, input.kind, JSON.stringify({ dpi: input.dpi, bleedMm: input.bleedMm }), now()]);
+        run("INSERT INTO exports (id, album_id, kind, status, settings, created_at) VALUES (?, ?, ?, 'queued', ?, ?)", [id, albumId, input.kind, JSON.stringify({ dpi: input.dpi, bleedMm: input.bleedMm, colorMode: input.colorMode ?? "rgb", presetId: input.presetId ?? null }), now()]);
         await persistDb();
         runExport(id);
         return { id, albumId, kind: input.kind, status: "queued", filePath: null, error: null, createdAt: now() };
@@ -182,7 +182,7 @@ async function runExport(exportId: string): Promise<void> {
 
     const exportPages: ExportPage[] = pages.map((p) => ({
       layoutKey: p.layoutKey,
-      background: p.background as { color?: string } | null,
+        background: p.background as { color?: string; pattern?: string } | null,
       elements: p.elements.map((el) => ({
         type: el.type, photoId: el.photoId, x: el.x, y: el.y, width: el.width, height: el.height,
         rotation: el.rotation, crop: el.crop,

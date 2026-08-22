@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import AlbumEditor from "../components/AlbumEditor";
+import { LAB_PRESETS } from "@shared/api";
 import type { Album, AlbumPage, AlbumVersion, ExportJob } from "@shared/api";
 
 type Tab = "editor" | "versions" | "export";
@@ -13,6 +14,7 @@ export default function AlbumPage({ albumId }: { albumId: string }) {
   const [album, setAlbum] = useState<Album | null>(null);
   const [pages, setPages] = useState<AlbumPage[]>([]);
   const [tab, setTab] = useState<Tab>("editor");
+  const [presetId, setPresetId] = useState<string>(LAB_PRESETS[0].id);
   const [versions, setVersions] = useState<AlbumVersion[]>([]);
   const [exports, setExports] = useState<ExportJob[]>([]);
   const [layouts, setLayouts] = useState<LayoutOption[]>([]);
@@ -46,8 +48,15 @@ export default function AlbumPage({ albumId }: { albumId: string }) {
     setPages(await window.albumforge.albums.restoreVersion(albumId, versionId));
   }
 
-  async function doExport(kind: string, dpi = 300) {
-    const job = await window.albumforge.exports.create(albumId, { kind, dpi, bleedMm: 3 });
+  async function doExport(kind: string, dpiOverride?: number) {
+    const preset = LAB_PRESETS.find((p) => p.id === presetId) ?? LAB_PRESETS[0];
+    const job = await window.albumforge.exports.create(albumId, {
+      kind,
+      dpi: dpiOverride ?? preset.dpi,
+      bleedMm: preset.bleedMm,
+      colorMode: preset.colorMode,
+      presetId: preset.id,
+    });
     setExports((prev) => [...prev, job]);
     pollExport(job.id);
   }
@@ -118,15 +127,28 @@ export default function AlbumPage({ albumId }: { albumId: string }) {
 
       {tab === "export" && (
         <div className="space-y-4">
-          <div className="flex gap-2">
-            <button onClick={() => doExport("proof_pdf", 150)} className="btn-secondary">
-              Proof PDF (watermarked)
+          <div className="card p-4">
+            <label className="field-label">Lab preset</label>
+            <select value={presetId} onChange={(e) => setPresetId(e.target.value)} className="input">
+              {LAB_PRESETS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} — {p.dpi} DPI
+                </option>
+              ))}
+            </select>
+            <p className="mt-2 text-xs text-slate-400">
+              {LAB_PRESETS.find((p) => p.id === presetId)?.description}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => doExport("proof_pdf")} className="btn-secondary">
+              Proof PDF
             </button>
             <button onClick={() => doExport("preview_pdf")} className="btn-secondary">
               Preview PDF
             </button>
             <button onClick={() => doExport("highres_pdf")} className="btn-primary">
-              High-res PDF (300 DPI)
+              High-res PDF
             </button>
           </div>
           <ul className="space-y-2">

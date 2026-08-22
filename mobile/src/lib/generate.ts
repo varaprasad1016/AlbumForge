@@ -120,6 +120,7 @@ export function familyFor(templateId: string): TemplateFamily {
     bleed: style.bleed ?? 0,
     safeArea: style.safeArea ?? 0.05,
     background: style.background ?? "#ffffff",
+    pattern: style.pattern ?? undefined,
   };
   return {
     key: t.key,
@@ -155,7 +156,7 @@ export function generateAndPersist(input: GenerateInput): string[] {
         albumId,
         i,
         page.layoutKey,
-        JSON.stringify({ color: family.style.background ?? "#ffffff" }),
+        JSON.stringify({ color: family.style.background ?? "#ffffff", pattern: family.style.pattern ?? null }),
       ]);
       for (const el of page.elements) {
         run(

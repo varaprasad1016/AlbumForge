@@ -17,6 +17,8 @@ const api: AlbumForgeApi = {
   dialogs: {
     chooseImages: () => ipcRenderer.invoke("dialogs:chooseImages"),
     chooseSavePath: (defaultName) => ipcRenderer.invoke("dialogs:chooseSavePath", defaultName),
+    chooseDirectory: () => ipcRenderer.invoke("dialogs:chooseDirectory"),
+    chooseFeedback: () => ipcRenderer.invoke("dialogs:chooseFeedback"),
   },
   projects: {
     list: () => ipcRenderer.invoke("projects:list"),
@@ -73,6 +75,11 @@ const api: AlbumForgeApi = {
   exports: {
     create: (albumId, input) => ipcRenderer.invoke("exports:create", albumId, input),
     get: (id) => ipcRenderer.invoke("exports:get", id),
+  },
+  proofs: {
+    build: (albumId, targetDir) => ipcRenderer.invoke("proofs:build", albumId, targetDir),
+    importFeedback: (projectId, filePath) => ipcRenderer.invoke("proofs:importFeedback", projectId, filePath),
+    notes: (projectId) => ipcRenderer.invoke("proofs:notes", projectId),
   },
 };
 

@@ -34,6 +34,7 @@ export interface PageStyle {
   bleed: number; // normalized bleed beyond trim (export)
   safeArea: number; // normalized inset considered safe
   background?: string; // default page background color (hex)
+  pattern?: string; // default page background pattern id
 }
 
 export interface AlbumSpec {
