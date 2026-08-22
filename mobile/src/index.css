@@ -2,10 +2,24 @@
 @tailwind components;
 @tailwind utilities;
 
+@font-face {
+  font-family: "Playfair Display";
+  src: url("font://font/Playfair%20Display") format("truetype");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Inter";
+  src: url("font://font/Inter") format("truetype");
+  font-display: swap;
+}
+
 :root {
   --brand: 99 102 241;
   --ink: 15 23 42;
   --surface: 255 255 255;
+  --shadow-soft: 0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 30px -10px rgba(15, 23, 42, 0.12);
+  --shadow-lift: 0 2px 4px rgba(15, 23, 42, 0.05), 0 18px 44px -14px rgba(15, 23, 42, 0.22);
 
   --slate-50: 248 250 252;
   --slate-100: 241 245 249;
@@ -37,6 +51,8 @@
   --brand: 129 140 248;
   --ink: 226 232 240;
   --surface: 30 41 59;
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.35), 0 12px 32px -10px rgba(0, 0, 0, 0.45);
+  --shadow-lift: 0 2px 4px rgba(0, 0, 0, 0.4), 0 20px 48px -14px rgba(0, 0, 0, 0.6);
 
   --slate-50: 15 23 42;
   --slate-100: 30 41 59;
@@ -78,28 +94,96 @@ body {
   background-attachment: fixed;
 }
 
+@layer base {
+  h1 {
+    @apply font-display font-semibold tracking-tight;
+  }
+
+  ::selection {
+    background: rgb(99 102 241 / 0.25);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(var(--slate-300) / 0.8);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--slate-400) / 0.9);
+    background-clip: content-box;
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+main > * {
+  animation: fade-up 0.28s ease both;
+}
+
 @layer components {
   .card {
-    @apply rounded-2xl border border-slate-200/70 bg-surface shadow-card;
+    @apply rounded-2xl border border-slate-200/60 bg-surface;
+    box-shadow: var(--shadow-soft);
   }
 
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-150 hover:shadow-md hover:brightness-105 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-indigo-500 via-violet-500 to-violet-600 px-4 py-2 text-sm font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 disabled:cursor-not-allowed disabled:opacity-50;
+    box-shadow: 0 6px 18px -6px rgb(99 102 241 / 0.55);
+  }
+  .btn-primary:hover:not(:disabled) {
+    transform: translateY(-1px);
+    filter: brightness(1.06);
+    box-shadow: 0 10px 24px -8px rgb(99 102 241 / 0.6);
+  }
+  .btn-primary:active:not(:disabled) {
+    transform: scale(0.98);
   }
 
   .btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-surface px-4 py-2 text-sm font-semibold text-slate-700 transition-all duration-150 hover:bg-slate-100 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-surface px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition-all duration-150 hover:border-slate-300 hover:bg-slate-50 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-3 py-1.5 text-sm font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300;
   }
 
   .input {
-    @apply w-full rounded-lg border border-slate-300 bg-surface px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 transition-colors focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100;
+    @apply w-full rounded-xl border border-slate-200 bg-surface px-3 py-2 text-sm text-slate-800 shadow-sm transition-all placeholder:text-slate-400 hover:border-slate-300 focus:border-indigo-400 focus:shadow-md focus:outline-none focus:ring-2 focus:ring-indigo-100;
   }
 
   .field-label {
     @apply mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500;
   }
 
-  .tab-pill {
-    @apply rounded-lg px-3 py-1.5 text-sm font-semibold capitalize transition-colors;
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-surface px-2.5 py-1 text-xs font-medium text-slate-500;
   }
 }

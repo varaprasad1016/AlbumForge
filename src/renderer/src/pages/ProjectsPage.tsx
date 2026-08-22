@@ -91,15 +91,15 @@ export default function ProjectsPage() {
             </button>
           </form>
 
-          <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <ul className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {projects.map((p) => (
               <li key={p.id} className="group relative">
                 <a
                   href={`#/projects/${p.id}`}
-                  className="card block overflow-hidden transition-all hover:-translate-y-0.5 hover:shadow-md"
+                  className="card block overflow-hidden transition-all duration-200 hover:-translate-y-1 hover:shadow-lift"
                 >
-                  <div className="relative aspect-[4/3] w-full bg-slate-100">
-                    <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-indigo-100 to-violet-100 text-3xl font-bold text-indigo-400">
+                  <div className="relative aspect-[4/3] w-full overflow-hidden bg-slate-100">
+                    <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-indigo-100 to-violet-100 text-4xl font-display font-bold text-indigo-400">
                       {p.name.charAt(0).toUpperCase()}
                     </div>
                     {p.thumbnailPhotoId && (
@@ -107,12 +107,16 @@ export default function ProjectsPage() {
                         src={`media://preview1024/${p.thumbnailPhotoId}`}
                         alt={p.name}
                         draggable={false}
-                        className="absolute inset-0 h-full w-full object-cover"
+                        className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
                         onError={(e) => {
                           e.currentTarget.style.display = "none";
                         }}
                       />
                     )}
+                    <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-slate-900/50 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
+                    <span className="absolute bottom-2 right-2 flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-sm text-slate-600 opacity-0 shadow transition-opacity duration-200 group-hover:opacity-100">
+                      →
+                    </span>
                   </div>
                   <div className="p-4">
                     <div className="truncate font-semibold text-ink group-hover:text-brand">{p.name}</div>
@@ -122,7 +126,7 @@ export default function ProjectsPage() {
                 <button
                   onClick={() => deleteProject(p)}
                   title="Delete project"
-                  className="absolute right-3 top-3 rounded-lg p-1.5 text-slate-400 opacity-0 transition-opacity hover:bg-red-50 hover:text-red-600 group-hover:opacity-100"
+                  className="absolute right-3 top-3 rounded-lg bg-white/90 p-1.5 text-slate-400 opacity-0 shadow transition-opacity hover:bg-red-600 hover:text-white group-hover:opacity-100"
                 >
                   ✕
                 </button>

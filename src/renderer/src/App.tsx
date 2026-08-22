@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import Nav from "./components/Nav";
+import ToastHost from "./components/Toast";
 import AlbumsPage from "./pages/AlbumsPage";
 import AlbumPage from "./pages/AlbumPage";
 import ProjectPage from "./pages/ProjectPage";
@@ -38,10 +39,13 @@ export default function App() {
   else if (root === "settings") page = <SettingsPage />;
   else page = <ProjectsPage />;
 
+  const wide = root === "albums" && !!id;
+
   return (
     <div className="min-h-screen">
       <Nav />
-      <main className="mx-auto max-w-7xl p-6">{page}</main>
+      <main className={`ml-60 ${wide ? "p-6" : "mx-auto max-w-7xl p-8"}`}>{page}</main>
+      <ToastHost />
     </div>
   );
 }

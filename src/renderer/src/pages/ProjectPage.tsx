@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import PhotoGallery from "../components/PhotoGallery";
 import PromptModal from "../components/PromptModal";
+import { toast } from "../components/Toast";
 import { t, useLang } from "../i18n";
 import type { Album, ImportProgress, Photo, PhotoGroup, Project, TemplateSummary } from "@shared/api";
 
@@ -117,9 +118,10 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
     if (!paths || paths.length === 0) return;
     setImporting(true);
     try {
-      await window.albumforge.photos.importPhotos(projectId, paths);
+      const res = await window.albumforge.photos.importPhotos(projectId, paths);
       await loadGroups();
       await loadPhotos(true);
+      toast(`${res.imported} photo${res.imported === 1 ? "" : "s"} imported${res.failed ? `, ${res.failed} failed` : ""}`);
     } finally {
       setImporting(false);
       setProgress(null);

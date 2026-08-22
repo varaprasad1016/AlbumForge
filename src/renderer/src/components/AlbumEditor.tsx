@@ -19,6 +19,7 @@ import { PAGE_PATTERNS, patternDataUri } from "@shared/patterns";
 import { findGraphic, GRAPHICS, type ShapeKind } from "@shared/designs";
 import PhotoPicker from "./PhotoPicker";
 import PromptModal from "./PromptModal";
+import { toast } from "./Toast";
 import { useFonts } from "./useFonts";
 
 const PAGE_W = 600;
@@ -145,6 +146,7 @@ export default function AlbumEditor({
       setPagesState((prev) => prev.map((x) => (x.id === p.id ? updated : x)));
       setSelectedId(null);
       onPageUpdated(updated);
+      toast("Page saved");
     } finally {
       setSaving(false);
     }
@@ -467,81 +469,39 @@ export default function AlbumEditor({
   const safeInset = canvasW * 0.05;
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <button onClick={() => setPageIndex((i) => Math.max(0, i - 1))} className="btn-secondary !px-3 !py-1">
-          ←
-        </button>
-        <span className="text-sm">
-          Page {pageIndex + 1} / {pagesState.length}
-        </span>
-        <button onClick={() => setPageIndex((i) => Math.min(pagesState.length - 1, i + 1))} className="btn-secondary !px-3 !py-1">
-          →
-        </button>
-        <button onClick={addPage} className="btn-secondary !px-3 !py-1">
-          + Page
-        </button>
-        <button onClick={duplicatePage} className="btn-secondary !px-3 !py-1">
-          Duplicate
-        </button>
-        <button onClick={deletePage} className="btn-secondary !px-3 !py-1 !text-red-600 hover:!bg-red-50">
-          Delete page
-        </button>
+    <div className="flex flex-col gap-3">
+      {/* Top bar */}
+      <div className="flex items-center gap-2 rounded-2xl border border-slate-200/60 bg-surface/85 p-2 shadow-sm backdrop-blur">
+        <div className="flex items-center gap-1">
+          <button onClick={() => setPageIndex((i) => Math.max(0, i - 1))} className="btn-ghost !px-2" title="Previous page">
+            ←
+          </button>
+          <span className="chip !border-0 !bg-slate-100">
+            Page {pageIndex + 1} / {pagesState.length}
+          </span>
+          <button onClick={() => setPageIndex((i) => Math.min(pagesState.length - 1, i + 1))} className="btn-ghost !px-2" title="Next page">
+            →
+          </button>
+          <button onClick={addPage} className="btn-secondary !px-3 !py-1.5">
+            + Page
+          </button>
+          <button onClick={duplicatePage} className="btn-ghost">
+            Duplicate
+          </button>
+          <button onClick={deletePage} className="btn-ghost !text-red-500 hover:!bg-red-50">
+            Delete
+          </button>
+        </div>
 
-        {layouts.length > 0 && (
-          <select
-            value={page.layoutKey ?? ""}
-            onChange={(e) => changeLayout(e.target.value)}
-            className="input !w-auto !px-2 !py-1 text-sm"
-          >
-            {layouts.map((l) => (
-              <option key={l.key} value={l.key}>
-                Layout: {l.name}
-              </option>
-            ))}
-          </select>
-        )}
+        <div className="mx-1 h-6 w-px bg-slate-200" />
 
-        <label className="flex items-center gap-1 text-sm text-slate-600">
-          Background
-          <input
-            type="color"
-            value={bgColor}
-            onChange={(e) => setBackground(e.target.value)}
-            className="h-6 w-8 cursor-pointer rounded border border-slate-300"
-          />
-        </label>
-
-        <select
-          value={bgPattern ?? ""}
-          onChange={(e) => setPattern(e.target.value)}
-          className="input !w-auto !px-2 !py-1 text-sm"
-          title="Page pattern"
-        >
-          <option value="">No pattern</option>
-          {PAGE_PATTERNS.map((p) => (
-            <option key={p.id} value={p.id}>
-              Pattern: {p.name}
-            </option>
-          ))}
-        </select>
-
-        <button onClick={() => setPicker("add")} className="btn-secondary !px-3 !py-1">
-          Add photo
-        </button>
-        <button
-          onClick={() => setPicker("replace")}
-          disabled={!selected || selected.type !== "image"}
-          className="btn-secondary !px-3 !py-1"
-        >
-          Replace
-        </button>
-        <button onClick={deleteSelected} disabled={!selected} className="btn-secondary !px-3 !py-1">
-          Delete
-        </button>
-        <button onClick={addText} className="btn-secondary !px-3 !py-1">
-          Add text
-        </button>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button onClick={() => setPicker("add")} className="btn-primary !px-3 !py-1.5">
+            Add photo
+          </button>
+          <button onClick={addText} className="btn-secondary !px-3 !py-1.5">
+            Text
+          </button>
 
         <select
           value=""
@@ -581,174 +541,56 @@ export default function AlbumEditor({
           ))}
         </select>
 
-        <button onClick={importAssets} className="btn-secondary !px-2.5 !py-1 text-xs" title="Import SVG or PNG graphics">
-          Import graphics…
-        </button>
+          <button onClick={importAssets} className="btn-secondary !px-2.5 !py-1.5 text-xs" title="Import SVG or PNG graphics">
+            Import…
+          </button>
+        </div>
 
-        <button onClick={saveDesign} className="btn-secondary !px-2.5 !py-1 text-xs" title="Save this page layout as a reusable design">
-          Save design
-        </button>
-
-        {designs.length > 0 && (
-          <select
-            value=""
-            onChange={(e) => {
-              if (e.target.value) void applyDesign(e.target.value);
-            }}
-            className="input !w-auto !px-2 !py-1 text-sm"
-            title="Apply a saved page design"
-          >
-            <option value="">Apply design…</option>
-            {designs.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </select>
-        )}
-
-        {selected && (
-          <>
-            <button onClick={() => moveSelectedZ(1)} className="btn-secondary !px-2 !py-1 text-xs" title="Bring forward">
-              Forward
-            </button>
-            <button onClick={() => moveSelectedZ(-1)} className="btn-secondary !px-2 !py-1 text-xs" title="Send backward">
-              Backward
-            </button>
-          </>
-        )}
-
-        {selected?.type === "text" && (
-          <>
-            <select
-              value={(selected.style as { fontFamily?: string } | null)?.fontFamily ?? ""}
-              onChange={(e) =>
-                updateElement(selected.id, {
-                  style: { ...(selected.style ?? {}), fontFamily: e.target.value || undefined },
-                })
-              }
-              className="input !w-auto !px-2 !py-1 text-sm"
-              title="Font"
-            >
-              <option value="">Default font</option>
-              {fonts.map((f) => (
-                <option key={f} value={f} style={{ fontFamily: `'${f}'` }}>
-                  {f}
-                </option>
-              ))}
-            </select>
-            <input
-              type="number"
-              min={8}
-              max={200}
-              value={(selected.style as { fontSize?: number } | null)?.fontSize ?? 28}
-              onChange={(e) =>
-                updateElement(selected.id, {
-                  style: { ...(selected.style ?? {}), fontSize: Number(e.target.value) },
-                })
-              }
-              className="input !w-20 !px-2 !py-1 text-sm"
-              title="Font size"
-            />
-            <input
-              type="color"
-              value={(selected.style as { color?: string } | null)?.color ?? "#000000"}
-              onChange={(e) =>
-                updateElement(selected.id, {
-                  style: { ...(selected.style ?? {}), color: e.target.value },
-                })
-              }
-              className="h-6 w-8 cursor-pointer rounded border border-slate-300"
-              title="Text color"
-            />
-          </>
-        )}
-
-        {selected?.type === "shape" && (
-          <>
-            <input
-              type="color"
-              value={(selected.style as { fill?: string } | null)?.fill ?? "#6366f1"}
-              onChange={(e) =>
-                updateElement(selected.id, {
-                  style: { ...(selected.style ?? {}), fill: e.target.value },
-                })
-              }
-              className="h-6 w-8 cursor-pointer rounded border border-slate-300"
-              title="Fill color"
-            />
-            <input
-              type="color"
-              value={(selected.style as { stroke?: string } | null)?.stroke ?? "#6366f1"}
-              onChange={(e) =>
-                updateElement(selected.id, {
-                  style: { ...(selected.style ?? {}), stroke: e.target.value },
-                })
-              }
-              className="h-6 w-8 cursor-pointer rounded border border-slate-300"
-              title="Stroke color"
-            />
-            <input
-              type="number"
-              min={1}
-              max={40}
-              value={(selected.style as { strokeWidth?: number } | null)?.strokeWidth ?? 2}
-              onChange={(e) =>
-                updateElement(selected.id, {
-                  style: { ...(selected.style ?? {}), strokeWidth: Number(e.target.value) },
-                })
-              }
-              className="input !w-16 !px-2 !py-1 text-sm"
-              title="Stroke width"
-            />
-          </>
-        )}
-
-        {selected?.type === "graphic" && (
-          <input
-            type="color"
-            value={(selected.style as { color?: string } | null)?.color ?? "#6366f1"}
-            onChange={(e) =>
-              updateElement(selected.id, {
-                style: { ...(selected.style ?? {}), color: e.target.value },
-              })
-            }
-            className="h-6 w-8 cursor-pointer rounded border border-slate-300"
-            title="Graphic color"
-          />
-        )}
-
-        {(selected?.type === "shape" || selected?.type === "graphic") && (
-          <input
-            type="number"
-            min={0.1}
-            max={1}
-            step={0.05}
-            value={(selected.style as { opacity?: number } | null)?.opacity ?? 1}
-            onChange={(e) =>
-              updateElement(selected.id, {
-                style: { ...(selected.style ?? {}), opacity: Number(e.target.value) },
-              })
-            }
-            className="input !w-16 !px-2 !py-1 text-sm"
-            title="Opacity"
-          />
-        )}
-
-        <div className="ml-auto flex gap-2">
-          <button onClick={undo} className="btn-secondary !px-3 !py-1">
+        <div className="ml-auto flex items-center gap-1.5">
+          <button onClick={undo} className="btn-ghost" title="Undo (Ctrl+Z)">
             Undo
           </button>
-          <button onClick={redo} className="btn-secondary !px-3 !py-1">
+          <button onClick={redo} className="btn-ghost" title="Redo (Ctrl+Y)">
             Redo
           </button>
-          <button onClick={() => persist(pagesState)} disabled={saving} className="btn-primary !px-4 !py-1">
+          <button onClick={() => persist(pagesState)} disabled={saving} className="btn-primary !px-4 !py-1.5">
             {saving ? "Saving…" : "Save"}
           </button>
         </div>
       </div>
 
-      <div className="flex justify-center overflow-x-auto rounded-lg bg-neutral-200 p-6">
+      {/* Workspace */}
+      <div className="flex h-[calc(100vh-150px)] gap-3">
+        <aside className="w-44 shrink-0 overflow-y-auto rounded-2xl border border-slate-200/60 bg-surface/70 p-2">
+          <div className="flex items-center justify-between px-1 pb-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Pages</span>
+            <button onClick={addPage} className="btn-ghost !px-1.5 !py-0.5 text-base" title="Add page">
+              +
+            </button>
+          </div>
+          <div className="space-y-2">
+            {pagesState.map((p, i) => (
+              <button
+                key={p.id}
+                onClick={() => setPageIndex(i)}
+                className={`group w-full overflow-hidden rounded-xl border-2 text-left transition-all duration-150 ${
+                  i === pageIndex ? "border-indigo-500 shadow-md" : "border-transparent hover:border-slate-300"
+                }`}
+              >
+                <MiniPage page={p} aspect={aspect} />
+                <div className="flex items-center justify-between bg-surface px-1.5 py-1 text-[10px] font-medium text-slate-400">
+                  <span>
+                    {p.isSpread ? "Spread" : "Page"} {i + 1}
+                  </span>
+                  {i === 0 && <span className="rounded bg-indigo-50 px-1 text-indigo-500">Cover</span>}
+                </div>
+              </button>
+            ))}
+          </div>
+        </aside>
+
+        <section className="flex flex-1 items-center justify-center overflow-auto rounded-2xl bg-neutral-200/90 p-6">
+          <div className="shadow-2xl shadow-slate-900/20">
         <Stage width={canvasW + 80} height={PAGE_H + 80}>
           <Layer>
             <Rect
@@ -830,6 +672,243 @@ export default function AlbumEditor({
             <Transformer ref={trRef} rotateEnabled anchorSize={8} />
           </Layer>
         </Stage>
+          </div>
+        </section>
+
+        {/* Inspector */}
+        <aside className="w-72 shrink-0 space-y-3 overflow-y-auto">
+          <section className="card p-4">
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Page</h3>
+            {layouts.length > 0 && (
+              <div className="mb-3">
+                <label className="field-label">Layout</label>
+                <select value={page.layoutKey ?? ""} onChange={(e) => changeLayout(e.target.value)} className="input">
+                  {layouts.map((l) => (
+                    <option key={l.key} value={l.key}>
+                      {l.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <div className="mb-3">
+              <label className="field-label">Background</label>
+              <input
+                type="color"
+                value={bgColor}
+                onChange={(e) => setBackground(e.target.value)}
+                className="h-9 w-full cursor-pointer rounded-lg border border-slate-200"
+              />
+            </div>
+            <div>
+              <label className="field-label">Pattern</label>
+              <select value={bgPattern ?? ""} onChange={(e) => setPattern(e.target.value)} className="input">
+                <option value="">None</option>
+                {PAGE_PATTERNS.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </section>
+
+          <section className="card p-4">
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Designs</h3>
+            <div className="space-y-2">
+              <button onClick={saveDesign} className="btn-secondary w-full">
+                Save page as design
+              </button>
+              {designs.length > 0 && (
+                <select
+                  value=""
+                  onChange={(e) => {
+                    if (e.target.value) void applyDesign(e.target.value);
+                  }}
+                  className="input"
+                >
+                  <option value="">Apply design…</option>
+                  {designs.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </section>
+
+          {selected && (
+            <section className="card p-4">
+              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Element</h3>
+              <div className="mb-3 flex gap-1.5">
+                <button onClick={() => moveSelectedZ(1)} className="btn-secondary flex-1 !px-2 !py-1.5 text-xs">
+                  Forward
+                </button>
+                <button onClick={() => moveSelectedZ(-1)} className="btn-secondary flex-1 !px-2 !py-1.5 text-xs">
+                  Backward
+                </button>
+                {selected.type === "image" && (
+                  <button onClick={() => setPicker("replace")} className="btn-secondary flex-1 !px-2 !py-1.5 text-xs">
+                    Replace
+                  </button>
+                )}
+                <button onClick={deleteSelected} className="btn-secondary flex-1 !px-2 !py-1.5 text-xs !text-red-500">
+                  Delete
+                </button>
+              </div>
+              {selected.type === "text" && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="field-label">Font</label>
+                    <select
+                      value={(selected.style as { fontFamily?: string } | null)?.fontFamily ?? ""}
+                      onChange={(e) =>
+                        updateElement(selected.id, {
+                          style: { ...(selected.style ?? {}), fontFamily: e.target.value || undefined },
+                        })
+                      }
+                      className="input"
+                    >
+                      <option value="">Default</option>
+                      {fonts.map((f) => (
+                        <option key={f} value={f} style={{ fontFamily: `'${f}'` }}>
+                          {f}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex items-end gap-2">
+                    <div className="flex-1">
+                      <label className="field-label">Size</label>
+                      <input
+                        type="number"
+                        min={8}
+                        max={200}
+                        value={(selected.style as { fontSize?: number } | null)?.fontSize ?? 28}
+                        onChange={(e) =>
+                          updateElement(selected.id, {
+                            style: { ...(selected.style ?? {}), fontSize: Number(e.target.value) },
+                          })
+                        }
+                        className="input"
+                      />
+                    </div>
+                    <div>
+                      <label className="field-label">Color</label>
+                      <input
+                        type="color"
+                        value={(selected.style as { color?: string } | null)?.color ?? "#000000"}
+                        onChange={(e) =>
+                          updateElement(selected.id, {
+                            style: { ...(selected.style ?? {}), color: e.target.value },
+                          })
+                        }
+                        className="h-8 w-12 cursor-pointer rounded-lg border border-slate-200"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+              {selected.type === "shape" && (
+                <div className="space-y-3">
+                  <div className="flex gap-3">
+                    <div className="flex-1">
+                      <label className="field-label">Fill</label>
+                      <input
+                        type="color"
+                        value={(selected.style as { fill?: string } | null)?.fill ?? "#6366f1"}
+                        onChange={(e) =>
+                          updateElement(selected.id, {
+                            style: { ...(selected.style ?? {}), fill: e.target.value },
+                          })
+                        }
+                        className="h-8 w-full cursor-pointer rounded-lg border border-slate-200"
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <label className="field-label">Stroke</label>
+                      <input
+                        type="color"
+                        value={(selected.style as { stroke?: string } | null)?.stroke ?? "#6366f1"}
+                        onChange={(e) =>
+                          updateElement(selected.id, {
+                            style: { ...(selected.style ?? {}), stroke: e.target.value },
+                          })
+                        }
+                        className="h-8 w-full cursor-pointer rounded-lg border border-slate-200"
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <label className="field-label">Width</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={40}
+                        value={(selected.style as { strokeWidth?: number } | null)?.strokeWidth ?? 2}
+                        onChange={(e) =>
+                          updateElement(selected.id, {
+                            style: { ...(selected.style ?? {}), strokeWidth: Number(e.target.value) },
+                          })
+                        }
+                        className="input"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="field-label">Opacity</label>
+                    <input
+                      type="number"
+                      min={0.1}
+                      max={1}
+                      step={0.05}
+                      value={(selected.style as { opacity?: number } | null)?.opacity ?? 1}
+                      onChange={(e) =>
+                        updateElement(selected.id, {
+                          style: { ...(selected.style ?? {}), opacity: Number(e.target.value) },
+                        })
+                      }
+                      className="input"
+                    />
+                  </div>
+                </div>
+              )}
+              {selected.type === "graphic" && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="field-label">Color</label>
+                    <input
+                      type="color"
+                      value={(selected.style as { color?: string } | null)?.color ?? "#6366f1"}
+                      onChange={(e) =>
+                        updateElement(selected.id, {
+                          style: { ...(selected.style ?? {}), color: e.target.value },
+                        })
+                      }
+                      className="h-8 w-full cursor-pointer rounded-lg border border-slate-200"
+                    />
+                  </div>
+                  <div>
+                    <label className="field-label">Opacity</label>
+                    <input
+                      type="number"
+                      min={0.1}
+                      max={1}
+                      step={0.05}
+                      value={(selected.style as { opacity?: number } | null)?.opacity ?? 1}
+                      onChange={(e) =>
+                        updateElement(selected.id, {
+                          style: { ...(selected.style ?? {}), opacity: Number(e.target.value) },
+                        })
+                      }
+                      className="input"
+                    />
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+        </aside>
       </div>
 
       {picker && (
@@ -851,6 +930,86 @@ export default function AlbumEditor({
           onCancel={() => setPrompt(null)}
         />
       )}
+    </div>
+  );
+}
+
+function MiniPage({ page, aspect }: { page: AlbumPage; aspect: number }) {
+  const ratio = page.isSpread ? aspect * 2 : aspect;
+  const bg = (page.background as { color?: string; pattern?: string } | null) ?? {};
+  const color = bg.color ?? "#ffffff";
+  const patternUri = patternDataUri(bg.pattern ?? null);
+  return (
+    <div
+      className="relative w-full overflow-hidden bg-white"
+      style={{
+        aspectRatio: `${ratio}`,
+        backgroundImage: patternUri ? `url("${patternUri}")` : undefined,
+        backgroundColor: color,
+        backgroundRepeat: "repeat",
+      }}
+    >
+      {page.elements.map((el) => {
+        const box: React.CSSProperties = {
+          position: "absolute",
+          left: `${el.x * 100}%`,
+          top: `${el.y * 100}%`,
+          width: `${el.width * 100}%`,
+          height: `${el.height * 100}%`,
+        };
+        if (el.type === "image" && el.photoId) {
+          return (
+            <div
+              key={el.id}
+              style={{ ...box, backgroundImage: `url("media://preview1024/${el.photoId}")`, backgroundSize: "cover", backgroundPosition: "center" }}
+            />
+          );
+        }
+        if (el.type === "shape") {
+          const s = (el.style ?? {}) as { fill?: string; shape?: string };
+          const fill = s.fill ?? "#6366f1";
+          return (
+            <div
+              key={el.id}
+              style={{
+                ...box,
+                backgroundColor: fill,
+                borderRadius: s.shape === "ellipse" ? "999px" : "1px",
+              }}
+            />
+          );
+        }
+        if (el.type === "graphic") {
+          const s = (el.style ?? {}) as { color?: string; assetUri?: string };
+          return (
+            <div
+              key={el.id}
+              style={{
+                ...box,
+                backgroundImage: s.assetUri ? `url("${s.assetUri}")` : undefined,
+                backgroundSize: "contain",
+                backgroundRepeat: "no-repeat",
+                backgroundPosition: "center",
+                color: s.color ?? "#6366f1",
+                display: s.assetUri ? undefined : "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "9px",
+              }}
+            >
+              {!s.assetUri ? "✦" : ""}
+            </div>
+          );
+        }
+        if (el.type === "text") {
+          return (
+            <div key={el.id} style={{ ...box }} className="flex items-end">
+              <div className="w-full truncate border-b-2 border-slate-400 text-[6px] leading-none text-slate-400">T</div>
+            </div>
+          );
+        }
+        return null;
+      })}
     </div>
   );
 }
