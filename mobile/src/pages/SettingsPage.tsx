@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { AppInfo, UpdateEvent } from "@shared/api";
+import { setLang, t, useLang, type Lang } from "../lib/i18n";
 import { useTheme } from "../lib/theme";
 
 type UpdatePhase = "idle" | "checking" | "uptodate" | "available" | "downloading" | "downloaded" | "error";
@@ -12,6 +13,7 @@ export default function SettingsPage() {
   const [error, setError] = useState("");
   const [cacheCleared, setCacheCleared] = useState(false);
   const { dark, toggle } = useTheme();
+  const lang = useLang();
 
   useEffect(() => {
     window.albumforge.info().then(setInfo);
@@ -131,26 +133,37 @@ export default function SettingsPage() {
         </section>
 
         <section className="card p-4">
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Appearance</h2>
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">{t("settings.appearance")}</h2>
           <div className="flex items-center justify-between">
             <div>
-              <p className="font-medium text-ink">Dark mode</p>
-              <p className="text-xs text-slate-400">Switch between light and dark themes</p>
+              <p className="font-medium text-ink">{t("settings.darkMode")}</p>
+              <p className="text-xs text-slate-400">{t("settings.darkModeHint")}</p>
             </div>
             <button
               onClick={toggle}
               className={`relative h-7 w-12 rounded-full transition-colors ${dark ? "bg-indigo-500" : "bg-slate-300"}`}
-              title={dark ? "Switch to light mode" : "Switch to dark mode"}
+              title={dark ? t("nav.light") : t("nav.dark")}
             >
               <span
                 className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all ${dark ? "left-6" : "left-1"}`}
               />
             </button>
           </div>
+          <div className="mt-4 flex items-center justify-between">
+            <div>
+              <p className="font-medium text-ink">{t("settings.language")}</p>
+              <p className="text-xs text-slate-400">{t("settings.languageHint")}</p>
+            </div>
+            <select value={lang} onChange={(e) => setLang(e.target.value as Lang)} className="input !w-32">
+              <option value="en">English</option>
+              <option value="fr">Français</option>
+              <option value="hi">हिन्दी</option>
+            </select>
+          </div>
         </section>
 
         <section className="card p-4">
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Storage</h2>
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">{t("settings.storage")}</h2>
           <p className="text-sm text-slate-500">All data is stored locally on this device. Original photos are never uploaded.</p>
           <div className="mt-3 flex items-center gap-2">
             <button onClick={clearCache} className="btn-secondary">

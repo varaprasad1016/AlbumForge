@@ -4,7 +4,7 @@ import { autoUpdater } from "electron-updater";
 import { mkdirSync, rmSync, statSync, writeFileSync } from "fs";
 import { basename, extname, join } from "path";
 import { DB, newId, now } from "./db";
-import { analyzeImage, extractTimestamp, generateThumbnails, imageInfo } from "./imaging";
+import { analyzeImage, extractGps, extractTimestamp, generateThumbnails, imageInfo } from "./imaging";
 import { buildPdf, ExportPage, PhotoResolver } from "./export";
 import { albumById, generateAndPersist, pageAspect, photoRecordById, photoRecordsFor } from "./generate";
 import { composePage } from "./engine/layoutEngine";
@@ -252,8 +252,8 @@ export function registerIpc(ctx: IpcContext): void {
       `INSERT INTO photos
        (id, project_id, file_path, filename, width, height, orientation, file_size, mime_type,
         exif_timestamp, quality_score, blur_score, face_count, phash, processing_status, selected,
-        thumbnail_path, preview_path, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'ready', 0, ?, ?, ?)`,
+        thumbnail_path, preview_path, latitude, longitude, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'ready', 0, ?, ?, ?, ?, ?)`,
     );
 
     for (let i = 0; i < paths.length; i++) {
@@ -266,6 +266,7 @@ export function registerIpc(ctx: IpcContext): void {
         const thumbs = await generateThumbnails(p, cacheDir, id);
         const st = statSync(p);
         const capturedAt = (await extractTimestamp(p)) ?? st.mtime.toISOString();
+        const gps = await extractGps(p);
         insert.run(
           id,
           projectId,
@@ -282,6 +283,8 @@ export function registerIpc(ctx: IpcContext): void {
           analysis.phash.toString(),
           thumbs.thumb256,
           thumbs.preview1024,
+          gps?.latitude ?? null,
+          gps?.longitude ?? null,
           now(),
         );
         imported++;
@@ -323,6 +326,24 @@ export function registerIpc(ctx: IpcContext): void {
 
   ipcMain.handle("photos:setSelected", (_e, photoId: string, selected: boolean) => {
     db.prepare("UPDATE photos SET selected = ? WHERE id = ?").run(selected ? 1 : 0, photoId);
+  });
+
+  ipcMain.handle("photos:geo", (_e, projectId: string) => {
+    const rows = db
+      .prepare(
+        `SELECT id, filename, latitude, longitude, exif_timestamp
+         FROM photos
+         WHERE project_id = ? AND latitude IS NOT NULL AND longitude IS NOT NULL
+         ORDER BY exif_timestamp`,
+      )
+      .all(projectId) as Array<Record<string, unknown>>;
+    return rows.map((r) => ({
+      id: r.id as string,
+      filename: r.filename as string,
+      latitude: r.latitude as number,
+      longitude: r.longitude as number,
+      takenAt: (r.exif_timestamp as string) ?? null,
+    }));
   });
 
   ipcMain.handle("photos:remove", (_e, photoId: string) => {

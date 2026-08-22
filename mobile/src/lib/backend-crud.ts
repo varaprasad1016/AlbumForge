@@ -1,10 +1,25 @@
 /** Projects, photos, groups, templates and fonts API (mobile). */
+import exifr from "exifr";
 import { all, bytesToBase64, get, newId, now, persistDb, run, writeDataFile } from "./db";
 import { loadImage, phashOf, qualityOf, thumbnails } from "./imaging";
 import { segmentByTime } from "./engine/grouping";
 import { BUNDLED_FONTS } from "./fonts";
 import { emitProgress, groupsList, onProgress } from "./backend-helpers";
 import { photoDto, photoRecordsFor, projectDto } from "./generate";
+
+async function fileGps(file: File): Promise<{ latitude: number; longitude: number } | null> {
+  try {
+    const data = await exifr.parse(file, { gps: true });
+    const lat = data?.latitude;
+    const lng = data?.longitude;
+    if (typeof lat === "number" && typeof lng === "number" && (lat !== 0 || lng !== 0)) {
+      return { latitude: lat, longitude: lng };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 export function buildCrudApi(): any {
   return {
@@ -56,10 +71,11 @@ export function buildCrudApi(): any {
             const { thumb256, preview1024 } = await thumbnails(img);
             const phash = await phashOf(img);
             const { blurScore, qualityScore } = await qualityOf(img);
+            const gps = await fileGps(file);
             URL.revokeObjectURL(url);
             run(
-              "INSERT INTO photos (id, project_id, file_path, filename, width, height, orientation, file_size, mime_type, quality_score, blur_score, face_count, phash, processing_status, selected, thumbnail_path, preview_path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'ready', 0, ?, ?, ?)",
-              [id, projectId, `originals/${id}.jpg`, file.name, img.naturalWidth, img.naturalHeight, orientation, file.size, file.type || "image/jpeg", qualityScore, blurScore, phash.toString(), thumb256, preview1024, now()],
+              "INSERT INTO photos (id, project_id, file_path, filename, width, height, orientation, file_size, mime_type, quality_score, blur_score, face_count, phash, processing_status, selected, thumbnail_path, preview_path, latitude, longitude, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'ready', 0, ?, ?, ?, ?, ?)",
+              [id, projectId, `originals/${id}.jpg`, file.name, img.naturalWidth, img.naturalHeight, orientation, file.size, file.type || "image/jpeg", qualityScore, blurScore, phash.toString(), thumb256, preview1024, gps?.latitude ?? null, gps?.longitude ?? null, now()],
             );
             imported++;
             emitProgress({ current: imported + failed, total: files.length, filename: file.name, status: "done" });
@@ -91,6 +107,19 @@ export function buildCrudApi(): any {
         run("UPDATE photos SET selected = ? WHERE id = ?", [selected ? 1 : 0, photoId]);
         await persistDb();
       },
+      geo: async (projectId: string) =>
+        all(
+          `SELECT id, filename, latitude, longitude, exif_timestamp
+           FROM photos WHERE project_id = ? AND latitude IS NOT NULL AND longitude IS NOT NULL
+           ORDER BY exif_timestamp`,
+          [projectId],
+        ).map((r: any) => ({
+          id: r.id,
+          filename: r.filename,
+          latitude: r.latitude,
+          longitude: r.longitude,
+          takenAt: r.exif_timestamp ?? null,
+        })),
       remove: async (photoId: string) => {
         run("DELETE FROM photos WHERE id = ?", [photoId]);
         await persistDb();

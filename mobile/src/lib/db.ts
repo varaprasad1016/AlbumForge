@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS photos (
   width INTEGER, height INTEGER, orientation TEXT, file_size INTEGER, mime_type TEXT,
   exif_timestamp TEXT, quality_score REAL, blur_score REAL, face_count INTEGER DEFAULT 0,
   phash TEXT, processing_status TEXT NOT NULL DEFAULT 'ready', selected INTEGER NOT NULL DEFAULT 0,
-  group_id TEXT, thumbnail_path TEXT, preview_path TEXT, created_at TEXT NOT NULL
+  group_id TEXT, thumbnail_path TEXT, preview_path TEXT, latitude REAL, longitude REAL, created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_photos_project ON photos(project_id);
 CREATE TABLE IF NOT EXISTS photo_groups (
@@ -70,6 +70,16 @@ export async function initDb(): Promise<void> {
   db.run(SCHEMA);
   try {
     db.run("ALTER TABLE projects ADD COLUMN thumbnail_photo_id TEXT");
+  } catch {
+    /* already present */
+  }
+  try {
+    db.run("ALTER TABLE photos ADD COLUMN latitude REAL");
+  } catch {
+    /* already present */
+  }
+  try {
+    db.run("ALTER TABLE photos ADD COLUMN longitude REAL");
   } catch {
     /* already present */
   }

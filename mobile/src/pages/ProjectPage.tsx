@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import PhotoGallery from "../components/PhotoGallery";
 import PromptModal from "../components/PromptModal";
+import { t, useLang } from "../lib/i18n";
 import type { Album, ImportProgress, Photo, PhotoGroup, Project, TemplateSummary } from "@shared/api";
 
 const PAGE_LIMIT = 200;
 type View = "photos" | "generate" | "groups" | "albums";
 
 export default function ProjectPage({ projectId }: { projectId: string }) {
+  useLang();
   const [project, setProject] = useState<Project | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [total, setTotal] = useState(0);
@@ -263,6 +265,12 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
             {label}
           </button>
         ))}
+        <a
+          href={`#/map/${projectId}`}
+          className="flex-1 rounded-lg py-2 text-center text-sm font-semibold text-slate-500"
+        >
+          {t("project.map")}
+        </a>
       </div>
 
       {view === "photos" && (

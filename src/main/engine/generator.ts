@@ -5,7 +5,7 @@ layout stream, lead/hero selection, and bounded reordering for non-chronological
 families — while remaining professionally coherent.
 */
 import { composePage } from "./layoutEngine";
-import { isSpreadLayout } from "./layouts";
+import { isSpreadLayout, LAYOUT_CATALOG } from "./layouts";
 import { Rng, seededRandom, shuffle } from "./rng";
 import { albumScore } from "./scoring";
 import { chooseLayout } from "./templateEngine";
@@ -78,9 +78,31 @@ export function generateAlbum(
   const history: string[] = [];
   let remaining = ordered;
 
-  while (remaining.length > 0 && pages.length < spec.pageCount) {
-    const layout = chooseLayout(family, remaining.length, history, rng);
-    const take = Math.min(layout.slots.length, remaining.length);
+  // Cover page: lead photo full-bleed with the album title (keep one photo
+  // in reserve for the back cover).
+  if (remaining.length >= 2 && spec.coverTitle) {
+    const coverPhoto = remaining[0];
+    remaining = remaining.slice(1);
+    const elements = composePage(LAYOUT_CATALOG["cover_front"], [coverPhoto], spec.pageAspect);
+    elements.push({
+      type: "text",
+      photoId: null,
+      x: 0.06,
+      y: 0.8,
+      width: 0.88,
+      height: 0.1,
+      rotation: 0,
+      crop: null,
+      z: elements.length,
+      text: { content: spec.coverTitle },
+      style: { color: "#ffffff", fontSize: 72, fontFamily: "Playfair Display" },
+    });
+    pages.push({ layoutKey: "cover_front", spread: false, elements });
+  }
+
+  while (remaining.length > 1 && pages.length < spec.pageCount) {
+    const layout = chooseLayout(family, remaining.length - 1, history, rng);
+    const take = Math.min(layout.slots.length, remaining.length - 1);
     const pagePhotos = remaining.slice(0, take);
     remaining = remaining.slice(take);
     const spread = isSpreadLayout(layout.key);
@@ -89,7 +111,17 @@ export function generateAlbum(
     history.push(layout.key);
   }
 
-  const photoCount = pages.reduce((s, p) => s + p.elements.length, 0);
+  // Back cover: last remaining photo, full bleed.
+  if (remaining.length > 0 && pages.length < spec.pageCount) {
+    const backPhoto = remaining[remaining.length - 1];
+    const elements = composePage(LAYOUT_CATALOG["cover_back"], [backPhoto], spec.pageAspect);
+    pages.push({ layoutKey: "cover_back", spread: false, elements });
+  }
+
+  const photoCount = pages.reduce(
+    (s, p) => s + p.elements.filter((e) => e.type === "image").length,
+    0,
+  );
   return {
     variation,
     pageCount: pages.length,

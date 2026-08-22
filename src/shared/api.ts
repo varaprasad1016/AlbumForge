@@ -170,6 +170,14 @@ export interface ImportResult {
   failed: number;
 }
 
+export interface GeoPoint {
+  id: string;
+  filename: string;
+  latitude: number;
+  longitude: number;
+  takenAt: string | null;
+}
+
 export interface GenerateInput {
   projectId: string;
   templateId: string;
@@ -224,6 +232,7 @@ export interface AlbumForgeApi {
       projectId: string,
       opts: { offset: number; limit: number; selected?: boolean; status?: string; groupId?: string },
     ): Promise<{ items: Photo[]; total: number }>;
+    geo(projectId: string): Promise<GeoPoint[]>;
     setSelected(photoId: string, selected: boolean): Promise<void>;
     remove(photoId: string): Promise<void>;
     onImportProgress(cb: (p: ImportProgress) => void): () => void;

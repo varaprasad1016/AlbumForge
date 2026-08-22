@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import PhotoGallery from "../components/PhotoGallery";
 import PromptModal from "../components/PromptModal";
+import { t, useLang } from "../i18n";
 import type { Album, ImportProgress, Photo, PhotoGroup, Project, TemplateSummary } from "@shared/api";
 
 const PAGE_LIMIT = 200;
 
 export default function ProjectPage({ projectId }: { projectId: string }) {
+  useLang();
   const [project, setProject] = useState<Project | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [total, setTotal] = useState(0);
@@ -204,6 +206,7 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <a href={`#/map/${projectId}`} className="btn-secondary !px-3 !py-1">{t("project.map")}</a>
           {selected.size === 1 && (
             <button onClick={() => setThumbnail([...selected][0])} className="btn-secondary !text-amber-600 hover:!bg-amber-50">
               ★ Set as thumbnail
@@ -215,7 +218,7 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
             </button>
           )}
           <button onClick={handleImport} disabled={importing} className="btn-primary">
-            {importing ? "Importing…" : "Import photos"}
+            {importing ? t("project.importing") : t("project.import")}
           </button>
         </div>
       </div>
@@ -265,7 +268,7 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
             }}
             className="font-semibold text-brand hover:underline"
           >
-            Show all
+            {t("project.allPhotos")}
           </button>
         </div>
       )}
@@ -283,7 +286,7 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
 
         <aside className="space-y-6">
           <section className="card p-4">
-            <h2 className="mb-3 font-semibold">Generate albums</h2>
+            <h2 className="mb-3 font-semibold">{t("project.generate")}</h2>
             <div className="space-y-3 text-sm">
               <div>
                 <label className="field-label">Template</label>
@@ -336,14 +339,14 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
                 </select>
               </div>
               <button onClick={handleGenerate} disabled={generating} className="btn-primary w-full">
-                {generating ? "Generating…" : "Generate albums"}
+                {generating ? t("project.generating") : t("project.generate")}
               </button>
             </div>
           </section>
 
           <section className="card p-4">
             <div className="mb-2 flex items-center justify-between">
-              <h2 className="font-semibold">Groups</h2>
+              <h2 className="font-semibold">{t("project.groups")}</h2>
               <div className="flex gap-1">
                 <button onClick={autoGroup} className="btn-secondary !px-2.5 !py-1 text-xs">
                   Auto-group
@@ -408,7 +411,7 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
           </section>
 
           <section className="card p-4">
-            <h2 className="mb-2 font-semibold">Albums</h2>
+            <h2 className="mb-2 font-semibold">{t("project.albums")}</h2>
             <ul className="space-y-2">
               {albums.map((a) => (
                 <li key={a.id}>

@@ -105,8 +105,8 @@ export function persistAlbum(
   );
   const insertElement = db.prepare(
     `INSERT INTO album_elements
-     (id, album_id, page_id, type, z, x, y, width, height, rotation, photo_id, crop)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     (id, album_id, page_id, type, z, x, y, width, height, rotation, photo_id, crop, text, style)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
 
   for (let i = 0; i < result.pages.length; i++) {
@@ -127,6 +127,8 @@ export function persistAlbum(
         el.rotation,
         el.photoId,
         el.crop ? JSON.stringify(el.crop) : null,
+        el.text ? JSON.stringify(el.text) : null,
+        el.style ? JSON.stringify(el.style) : null,
       );
     }
   }
@@ -140,7 +142,15 @@ export function generateAndPersist(db: DB, input: GenerateInput): string[] {
 
   const family = familyFor(db, input.templateId);
   const aspect = pageAspect(input.pageSize);
-  const spec = { pageCount: input.pageCount, pageAspect: aspect, style: family.style };
+  const project = db.prepare("SELECT name FROM projects WHERE id = ?").get(input.projectId) as
+    | { name: string }
+    | undefined;
+  const spec = {
+    pageCount: input.pageCount,
+    pageAspect: aspect,
+    style: family.style,
+    coverTitle: project?.name ?? null,
+  };
 
   const albumIds: string[] = [];
   for (let v = 1; v <= input.variations; v++) {

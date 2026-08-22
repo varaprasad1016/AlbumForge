@@ -238,4 +238,17 @@ describe("spreads", () => {
       expect(result.pages[i].spread && result.pages[i - 1].spread).toBe(false);
     }
   });
+
+  it("adds a titled cover and a full-bleed back cover", () => {
+    const result = generateAlbum(makePhotos(50), FAMILY, { ...SPEC, coverTitle: "Wedding" }, 1);
+    expect(result.pages[0].layoutKey).toBe("cover_front");
+    expect(
+      result.pages[0].elements.some(
+        (e) => e.type === "text" && (e.text as { content?: string } | undefined)?.content === "Wedding",
+      ),
+    ).toBe(true);
+    expect(result.pages[result.pages.length - 1].layoutKey).toBe("cover_back");
+    const ids = result.pages.flatMap((p) => p.elements.filter((e) => e.type === "image").map((e) => e.photoId));
+    expect(new Set(ids).size).toBe(ids.length);
+  });
 });

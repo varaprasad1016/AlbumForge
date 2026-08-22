@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
+import { t, useLang } from "../lib/i18n";
 
 const TABS = [
-  { key: "projects", label: "Projects", href: "#/projects" },
-  { key: "templates", label: "Templates", href: "#/templates" },
-  { key: "albums", label: "Albums", href: "#/albums" },
-  { key: "settings", label: "Settings", href: "#/settings" },
+  { key: "projects", href: "#/projects", labelKey: "nav.projects" },
+  { key: "templates", href: "#/templates", labelKey: "nav.templates" },
+  { key: "albums", href: "#/albums", labelKey: "nav.albums" },
+  { key: "settings", href: "#/settings", labelKey: "nav.settings" },
 ];
 
 function Icon({ name, active }: { name: string; active: boolean }) {
@@ -45,6 +46,7 @@ function Icon({ name, active }: { name: string; active: boolean }) {
 
 export default function Nav() {
   const [root, setRoot] = useState(() => (window.location.hash.replace(/^#/, "").split("/")[1] || "projects"));
+  useLang();
 
   useEffect(() => {
     const onChange = () => setRoot(window.location.hash.replace(/^#/, "").split("/")[1] || "projects");
@@ -63,7 +65,7 @@ export default function Nav() {
           return (
             <a key={t.key} href={t.href} className="flex flex-1 flex-col items-center gap-0.5 py-2">
               <Icon name={t.key} active={active} />
-              <span className={`text-[11px] font-medium ${active ? "text-brand" : "text-slate-400"}`}>{t.label}</span>
+              <span className={`text-[11px] font-medium ${active ? "text-brand" : "text-slate-400"}`}>{t(t.labelKey)}</span>
             </a>
           );
         })}

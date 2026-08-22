@@ -40,6 +40,7 @@ export interface AlbumSpec {
   pageCount: number;
   pageAspect: number; // page width / height
   style: PageStyle;
+  coverTitle?: string | null;
 }
 
 export interface TemplateFamily {

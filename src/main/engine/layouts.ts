@@ -258,6 +258,23 @@ register({
   ],
 });
 
+// ---- Covers ---------------------------------------------------------------
+// Generated explicitly by the generator (not part of family layout pools).
+
+register({
+  key: "cover_front",
+  name: "Cover",
+  weight: 1.0,
+  slots: [{ x: 0, y: 0, w: 1, h: 1, orientationHint: "landscape", bleed: true }],
+});
+
+register({
+  key: "cover_back",
+  name: "Back cover",
+  weight: 1.0,
+  slots: [{ x: 0, y: 0, w: 1, h: 1, orientationHint: "any", bleed: true }],
+});
+
 export function layoutKeys(): string[] {
   return Object.keys(LAYOUT_CATALOG);
 }

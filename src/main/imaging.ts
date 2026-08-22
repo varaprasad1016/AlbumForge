@@ -95,6 +95,26 @@ export async function analyzeImage(filePath: string): Promise<AnalysisResult> {
   return { blurScore: round4(blur), qualityScore: round4(quality), phash };
 }
 
+export interface GpsLocation {
+  latitude: number;
+  longitude: number;
+}
+
+/** Read GPS coordinates from EXIF (decimal degrees). Returns null when absent. */
+export async function extractGps(filePath: string): Promise<GpsLocation | null> {
+  try {
+    const data = await exifr.parse(filePath, { gps: true });
+    const lat = data?.latitude;
+    const lng = data?.longitude;
+    if (typeof lat === "number" && typeof lng === "number" && (lat !== 0 || lng !== 0)) {
+      return { latitude: lat, longitude: lng };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export interface ThumbnailResult {
   thumb256: string;
   preview1024: string;

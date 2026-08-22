@@ -28,6 +28,7 @@ const api: AlbumForgeApi = {
   photos: {
     importPhotos: (projectId, paths) => ipcRenderer.invoke("photos:import", projectId, paths),
     list: (projectId, opts) => ipcRenderer.invoke("photos:list", projectId, opts),
+    geo: (projectId) => ipcRenderer.invoke("photos:geo", projectId),
     setSelected: (photoId, selected) => ipcRenderer.invoke("photos:setSelected", photoId, selected),
     remove: (photoId) => ipcRenderer.invoke("photos:remove", photoId),
     onImportProgress: (cb) => {

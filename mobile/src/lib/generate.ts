@@ -136,7 +136,8 @@ export function generateAndPersist(input: GenerateInput): string[] {
   if (!selected.length) throw new Error("No photos available");
   const family = familyFor(input.templateId);
   const aspect = pageAspect(input.pageSize);
-  const spec = { pageCount: input.pageCount, pageAspect: aspect, style: family.style };
+  const project = get("SELECT name FROM projects WHERE id = ?", [input.projectId]) as { name: string } | undefined;
+  const spec = { pageCount: input.pageCount, pageAspect: aspect, style: family.style, coverTitle: project?.name ?? null };
 
   const ids: string[] = [];
   for (let v = 1; v <= input.variations; v++) {
@@ -158,8 +159,8 @@ export function generateAndPersist(input: GenerateInput): string[] {
       ]);
       for (const el of page.elements) {
         run(
-          "INSERT INTO album_elements (id, album_id, page_id, type, z, x, y, width, height, rotation, photo_id, crop) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          [newId(), albumId, pageId, el.type, el.z, el.x, el.y, el.width, el.height, el.rotation, el.photoId, el.crop ? JSON.stringify(el.crop) : null],
+          "INSERT INTO album_elements (id, album_id, page_id, type, z, x, y, width, height, rotation, photo_id, crop, text, style) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          [newId(), albumId, pageId, el.type, el.z, el.x, el.y, el.width, el.height, el.rotation, el.photoId, el.crop ? JSON.stringify(el.crop) : null, el.text ? JSON.stringify(el.text) : null, el.style ? JSON.stringify(el.style) : null],
         );
       }
     }

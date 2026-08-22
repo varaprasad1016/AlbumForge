@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import type { AppInfo, UpdateEvent } from "@shared/api";
+import { setLang, t, useLang, type Lang } from "../i18n";
+import { useTheme } from "../theme";
 
 type UpdateStatus =
   | { phase: "idle" }
@@ -14,6 +16,8 @@ export default function SettingsPage() {
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [update, setUpdate] = useState<UpdateStatus>({ phase: "idle" });
   const [cacheCleared, setCacheCleared] = useState(false);
+  const { dark, toggle } = useTheme();
+  const lang = useLang();
 
   useEffect(() => {
     window.albumforge.info().then(setInfo);
@@ -71,7 +75,35 @@ export default function SettingsPage() {
 
       <div className="space-y-4">
         <section className="card p-5">
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Storage</h2>
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">{t("settings.appearance")}</h2>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium text-ink">{t("settings.darkMode")}</p>
+              <p className="text-xs text-slate-400">{t("settings.darkModeHint")}</p>
+            </div>
+            <button
+              onClick={toggle}
+              className={`relative h-7 w-12 rounded-full transition-colors ${dark ? "bg-indigo-500" : "bg-slate-300"}`}
+              title={dark ? t("nav.light") : t("nav.dark")}
+            >
+              <span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all ${dark ? "left-6" : "left-1"}`} />
+            </button>
+          </div>
+          <div className="mt-4 flex items-center justify-between">
+            <div>
+              <p className="font-medium text-ink">{t("settings.language")}</p>
+              <p className="text-xs text-slate-400">{t("settings.languageHint")}</p>
+            </div>
+            <select value={lang} onChange={(e) => setLang(e.target.value as Lang)} className="input !w-32">
+              <option value="en">English</option>
+              <option value="fr">Français</option>
+              <option value="hi">हिन्दी</option>
+            </select>
+          </div>
+        </section>
+
+        <section className="card p-5">
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">{t("settings.storage")}</h2>
           <p className="text-sm text-slate-500">
             All data is stored locally on this computer. Original photos are never copied or moved.
           </p>
@@ -90,27 +122,27 @@ export default function SettingsPage() {
               Open data folder
             </button>
             <button onClick={clearCache} className="btn-secondary">
-              Clear thumbnail cache
+              {t("settings.clearCache")}
             </button>
-            {cacheCleared && <span className="text-sm font-medium text-emerald-600">Cache cleared ✓</span>}
+            {cacheCleared && <span className="text-sm font-medium text-emerald-600">{t("settings.cleared")}</span>}
           </div>
         </section>
 
         <section className="card p-5">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">Updates</h2>
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">{t("settings.updates")}</h2>
           <button
             onClick={checkUpdates}
             disabled={update.phase === "checking" || update.phase === "downloading"}
             className="btn-secondary"
           >
-            Check for updates
+            {t("settings.check")}
           </button>
 
           <div className="mt-3 text-sm">
-            {update.phase === "checking" && <p className="text-slate-500">Checking for updates…</p>}
+            {update.phase === "checking" && <p className="text-slate-500">{t("settings.checking")}</p>}
             {update.phase === "downloading" && (
               <div>
-                <p className="mb-1 text-slate-500">Downloading update… {update.percent}%</p>
+                <p className="mb-1 text-slate-500">{t("settings.downloading", { percent: update.percent })}</p>
                 <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
                   <div
                     className="h-1.5 rounded-full bg-gradient-to-r from-indigo-500 to-violet-600 transition-all"
@@ -119,7 +151,7 @@ export default function SettingsPage() {
                 </div>
               </div>
             )}
-            {update.phase === "uptodate" && <p className="text-emerald-600">You are up to date ✓</p>}
+            {update.phase === "uptodate" && <p className="text-emerald-600">{t("settings.uptodate")}</p>}
             {update.phase === "error" && <p className="text-red-600">{update.message}</p>}
           </div>
         </section>

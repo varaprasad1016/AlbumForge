@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS photos (
   group_id TEXT,
   thumbnail_path TEXT,
   preview_path TEXT,
+  latitude REAL,
+  longitude REAL,
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_photos_project ON photos(project_id);
@@ -163,5 +165,12 @@ function migrate(db: DB): void {
   const cols = db.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>;
   if (!cols.some((c) => c.name === "thumbnail_photo_id")) {
     db.exec("ALTER TABLE projects ADD COLUMN thumbnail_photo_id TEXT");
+  }
+  const photoCols = db.prepare("PRAGMA table_info(photos)").all() as Array<{ name: string }>;
+  if (!photoCols.some((c) => c.name === "latitude")) {
+    db.exec("ALTER TABLE photos ADD COLUMN latitude REAL");
+  }
+  if (!photoCols.some((c) => c.name === "longitude")) {
+    db.exec("ALTER TABLE photos ADD COLUMN longitude REAL");
   }
 }
