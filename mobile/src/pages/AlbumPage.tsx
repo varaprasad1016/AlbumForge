@@ -15,6 +15,13 @@ export default function AlbumPage({ albumId }: { albumId: string }) {
   const [pages, setPages] = useState<AlbumPage[]>([]);
   const [tab, setTab] = useState<Tab>("editor");
   const [presetId, setPresetId] = useState<string>(LAB_PRESETS[0].id);
+  const [customDpi, setCustomDpi] = useState("");
+
+  function effectiveDpi(presetDpi: number): number {
+    const n = parseInt(customDpi, 10);
+    if (Number.isFinite(n)) return Math.max(72, Math.min(1200, n));
+    return presetDpi;
+  }
   const [versions, setVersions] = useState<AlbumVersion[]>([]);
   const [exports, setExports] = useState<ExportJob[]>([]);
   const [layouts, setLayouts] = useState<LayoutOption[]>([]);
@@ -52,7 +59,7 @@ export default function AlbumPage({ albumId }: { albumId: string }) {
     const preset = LAB_PRESETS.find((p) => p.id === presetId) ?? LAB_PRESETS[0];
     const job = await window.albumforge.exports.create(albumId, {
       kind,
-      dpi: dpiOverride ?? preset.dpi,
+      dpi: dpiOverride ?? effectiveDpi(preset.dpi),
       bleedMm: preset.bleedMm,
       colorMode: preset.colorMode,
       presetId: preset.id,
@@ -129,15 +136,29 @@ export default function AlbumPage({ albumId }: { albumId: string }) {
         <div className="space-y-4">
           <div className="card p-4">
             <label className="field-label">Lab preset</label>
-            <select value={presetId} onChange={(e) => setPresetId(e.target.value)} className="input">
-              {LAB_PRESETS.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} — {p.dpi} DPI
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center gap-2">
+              <select value={presetId} onChange={(e) => setPresetId(e.target.value)} className="input flex-1">
+                {LAB_PRESETS.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} — {p.dpi} DPI
+                  </option>
+                ))}
+              </select>
+              <input
+                type="number"
+                min={72}
+                max={1200}
+                step={50}
+                value={customDpi}
+                onChange={(e) => setCustomDpi(e.target.value)}
+                placeholder="Custom DPI"
+                className="input !w-28"
+              />
+            </div>
             <p className="mt-2 text-xs text-slate-400">
-              {LAB_PRESETS.find((p) => p.id === presetId)?.description}
+              {customDpi
+                ? `Custom resolution ${effectiveDpi(300)} DPI — overrides the preset.`
+                : LAB_PRESETS.find((p) => p.id === presetId)?.description}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

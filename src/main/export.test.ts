@@ -71,4 +71,44 @@ describe("spread export", () => {
     const doc = await PDFDocument.load(pdf);
     expect(doc.getPageCount()).toBe(2);
   });
+
+  it("renders shapes and graphics as vector overlays", async () => {
+    await makePhoto("p3", 3000, 2000);
+    const page: ExportPage = {
+      layoutKey: "full_bleed",
+      background: { color: "#ffffff" },
+      elements: [
+        imageEl("p3", 0, 0, 1, 1, 0),
+        {
+          type: "shape",
+          photoId: null,
+          x: 0.1,
+          y: 0.1,
+          width: 0.3,
+          height: 0.3,
+          rotation: 15,
+          crop: null,
+          text: null,
+          style: { shape: "rect", fill: "#6366f1", stroke: "#0f172a", strokeWidth: 3, opacity: 0.8, radius: 8 },
+          z: 1,
+        },
+        {
+          type: "graphic",
+          photoId: null,
+          x: 0.5,
+          y: 0.3,
+          width: 0.3,
+          height: 0.2,
+          rotation: 0,
+          crop: null,
+          text: null,
+          style: { graphicId: "heart", color: "#e11d48", opacity: 1 },
+          z: 2,
+        },
+      ],
+    };
+    const pdf = await buildPdf([page], resolvePhoto, 100, 100, 60, 3);
+    const doc = await PDFDocument.load(pdf);
+    expect(doc.getPageCount()).toBe(1);
+  });
 });

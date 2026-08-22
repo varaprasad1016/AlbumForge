@@ -18,8 +18,15 @@ export default function AlbumPage({ albumId }: { albumId: string }) {
   const [exports, setExports] = useState<ExportJob[]>([]);
   const [layouts, setLayouts] = useState<LayoutOption[]>([]);
   const [presetId, setPresetId] = useState<string>(LAB_PRESETS[0].id);
+  const [customDpi, setCustomDpi] = useState("");
   const [proofInfo, setProofInfo] = useState("");
   const [notes, setNotes] = useState<Array<{ photoId: string; filename: string; comment: string }>>([]);
+
+  function effectiveDpi(presetDpi: number): number {
+    const n = parseInt(customDpi, 10);
+    if (Number.isFinite(n)) return Math.max(72, Math.min(1200, n));
+    return presetDpi;
+  }
 
   async function load() {
     const a = await window.albumforge.albums.get(albumId);
@@ -57,7 +64,7 @@ export default function AlbumPage({ albumId }: { albumId: string }) {
     const preset = LAB_PRESETS.find((p) => p.id === presetId) ?? LAB_PRESETS[0];
     const job = await window.albumforge.exports.create(albumId, {
       kind,
-      dpi: dpiOverride ?? preset.dpi,
+      dpi: dpiOverride ?? effectiveDpi(preset.dpi),
       bleedMm: preset.bleedMm,
       colorMode: preset.colorMode,
       presetId: preset.id,
@@ -73,7 +80,7 @@ export default function AlbumPage({ albumId }: { albumId: string }) {
     const preset = LAB_PRESETS.find((p) => p.id === presetId) ?? LAB_PRESETS[0];
     const job = await window.albumforge.exports.create(albumId, {
       kind: "lab_package",
-      dpi: preset.dpi,
+      dpi: effectiveDpi(preset.dpi),
       bleedMm: preset.bleedMm,
       colorMode: preset.colorMode,
       presetId: preset.id,
@@ -164,15 +171,29 @@ export default function AlbumPage({ albumId }: { albumId: string }) {
         <div className="space-y-4">
           <div className="card max-w-xl p-4">
             <label className="field-label">Lab preset</label>
-            <select value={presetId} onChange={(e) => setPresetId(e.target.value)} className="input">
-              {LAB_PRESETS.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} — {p.dpi} DPI · {p.bleedMm} mm bleed · {p.colorMode.toUpperCase()}
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center gap-2">
+              <select value={presetId} onChange={(e) => setPresetId(e.target.value)} className="input flex-1">
+                {LAB_PRESETS.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} — {p.dpi} DPI · {p.bleedMm} mm bleed · {p.colorMode.toUpperCase()}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="number"
+                min={72}
+                max={1200}
+                step={50}
+                value={customDpi}
+                onChange={(e) => setCustomDpi(e.target.value)}
+                placeholder="Custom DPI"
+                className="input !w-32"
+              />
+            </div>
             <p className="mt-2 text-xs text-slate-400">
-              {LAB_PRESETS.find((p) => p.id === presetId)?.description}
+              {customDpi
+                ? `Custom resolution ${effectiveDpi(300)} DPI — overrides the preset.`
+                : LAB_PRESETS.find((p) => p.id === presetId)?.description}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

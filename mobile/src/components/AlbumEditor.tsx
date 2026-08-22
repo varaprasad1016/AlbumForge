@@ -1,17 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Arrow,
+  Ellipse,
   Group,
   Image as KImage,
   Layer,
   Line,
+  Path,
   Rect,
   Stage,
+  Star,
   Text as KText,
   Transformer,
 } from "react-konva";
 import type Konva from "konva";
 import type { AlbumElement, AlbumPage, PageSize } from "@shared/api";
 import { PAGE_PATTERNS, patternDataUri } from "../lib/patterns";
+import { findGraphic, GRAPHICS, type ShapeKind } from "../lib/designs";
 import PhotoPicker from "./PhotoPicker";
 import PromptModal from "./PromptModal";
 import { useFonts } from "./useFonts";
@@ -245,6 +250,72 @@ export default function AlbumEditor({
     void persist(mutateElements([...elements, el]));
   }
 
+  function addShape(shape: ShapeKind) {
+    const maxZ = elements.reduce((m, e) => Math.max(m, e.z), -1);
+    const dims: Record<ShapeKind, [number, number, number, number]> = {
+      rect: [0.25, 0.25, 0.3, 0.3],
+      ellipse: [0.25, 0.25, 0.3, 0.3],
+      star: [0.3, 0.25, 0.25, 0.25],
+      line: [0.2, 0.48, 0.6, 0.03],
+      arrow: [0.2, 0.46, 0.6, 0.08],
+    };
+    const [x, y, w, h] = dims[shape];
+    const el: AlbumElement = {
+      id: `new-${Date.now()}`,
+      type: "shape",
+      z: maxZ + 1,
+      x,
+      y,
+      width: w,
+      height: h,
+      rotation: 0,
+      photoId: null,
+      crop: null,
+      text: null,
+      style: { shape, fill: "#6366f1", stroke: "#6366f1", strokeWidth: 2, opacity: 1, radius: 8 },
+    };
+    void persist(mutateElements([...elements, el]));
+  }
+
+  function addGraphic(graphicId: string) {
+    const g = findGraphic(graphicId);
+    if (!g) return;
+    const maxZ = elements.reduce((m, e) => Math.max(m, e.z), -1);
+    const w = 0.4;
+    const h = w * (g.h / g.w);
+    const el: AlbumElement = {
+      id: `new-${Date.now()}`,
+      type: "graphic",
+      z: maxZ + 1,
+      x: 0.3,
+      y: (1 - h) / 2,
+      width: w,
+      height: h,
+      rotation: 0,
+      photoId: null,
+      crop: null,
+      text: null,
+      style: { graphicId, color: "#6366f1", opacity: 1 },
+    };
+    void persist(mutateElements([...elements, el]));
+  }
+
+  function moveSelectedZ(delta: number) {
+    if (!selected) return;
+    const sorted = [...elements].sort((a, b) => a.z - b.z);
+    const idx = sorted.findIndex((e) => e.id === selected.id);
+    const target = idx + delta;
+    if (idx < 0 || target < 0 || target >= sorted.length) return;
+    const zA = sorted[idx].z;
+    const zB = sorted[target].z;
+    const next = elements.map((e) =>
+      e.id === sorted[idx].id ? { ...e, z: zB } : e.id === sorted[target].id ? { ...e, z: zA } : e,
+    );
+    void persist(
+      pagesState.map((p) => (p.id === page.id ? { ...p, elements: next.sort((a, b) => a.z - b.z) } : p)),
+    );
+  }
+
   async function changeLayout(layoutKey: string) {
     if (!page) return;
     const updated = await window.albumforge.albums.recomposePage(albumId, page.id, layoutKey);
@@ -431,6 +502,49 @@ export default function AlbumEditor({
           Add text
         </button>
 
+        <select
+          value=""
+          onChange={(e) => {
+            if (e.target.value) addShape(e.target.value as ShapeKind);
+          }}
+          className="input !w-auto !px-2 !py-1 text-sm"
+          title="Add shape"
+        >
+          <option value="">Add shape…</option>
+          <option value="rect">Rectangle</option>
+          <option value="ellipse">Ellipse</option>
+          <option value="line">Line</option>
+          <option value="arrow">Arrow</option>
+          <option value="star">Star</option>
+        </select>
+
+        <select
+          value=""
+          onChange={(e) => {
+            if (e.target.value) addGraphic(e.target.value);
+          }}
+          className="input !w-auto !px-2 !py-1 text-sm"
+          title="Add graphic"
+        >
+          <option value="">Add graphic…</option>
+          {GRAPHICS.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.name}
+            </option>
+          ))}
+        </select>
+
+        {selected && (
+          <>
+            <button onClick={() => moveSelectedZ(1)} className="btn-secondary !px-2 !py-1 text-xs" title="Bring forward">
+              Forward
+            </button>
+            <button onClick={() => moveSelectedZ(-1)} className="btn-secondary !px-2 !py-1 text-xs" title="Send backward">
+              Backward
+            </button>
+          </>
+        )}
+
         {selected?.type === "text" && (
           <>
             <select
@@ -463,7 +577,89 @@ export default function AlbumEditor({
               className="input !w-20 !px-2 !py-1 text-sm"
               title="Font size"
             />
+            <input
+              type="color"
+              value={(selected.style as { color?: string } | null)?.color ?? "#000000"}
+              onChange={(e) =>
+                updateElement(selected.id, {
+                  style: { ...(selected.style ?? {}), color: e.target.value },
+                })
+              }
+              className="h-6 w-8 cursor-pointer rounded border border-slate-300"
+              title="Text color"
+            />
           </>
+        )}
+
+        {selected?.type === "shape" && (
+          <>
+            <input
+              type="color"
+              value={(selected.style as { fill?: string } | null)?.fill ?? "#6366f1"}
+              onChange={(e) =>
+                updateElement(selected.id, {
+                  style: { ...(selected.style ?? {}), fill: e.target.value },
+                })
+              }
+              className="h-6 w-8 cursor-pointer rounded border border-slate-300"
+              title="Fill color"
+            />
+            <input
+              type="color"
+              value={(selected.style as { stroke?: string } | null)?.stroke ?? "#6366f1"}
+              onChange={(e) =>
+                updateElement(selected.id, {
+                  style: { ...(selected.style ?? {}), stroke: e.target.value },
+                })
+              }
+              className="h-6 w-8 cursor-pointer rounded border border-slate-300"
+              title="Stroke color"
+            />
+            <input
+              type="number"
+              min={1}
+              max={40}
+              value={(selected.style as { strokeWidth?: number } | null)?.strokeWidth ?? 2}
+              onChange={(e) =>
+                updateElement(selected.id, {
+                  style: { ...(selected.style ?? {}), strokeWidth: Number(e.target.value) },
+                })
+              }
+              className="input !w-16 !px-2 !py-1 text-sm"
+              title="Stroke width"
+            />
+          </>
+        )}
+
+        {selected?.type === "graphic" && (
+          <input
+            type="color"
+            value={(selected.style as { color?: string } | null)?.color ?? "#6366f1"}
+            onChange={(e) =>
+              updateElement(selected.id, {
+                style: { ...(selected.style ?? {}), color: e.target.value },
+              })
+            }
+            className="h-6 w-8 cursor-pointer rounded border border-slate-300"
+            title="Graphic color"
+          />
+        )}
+
+        {(selected?.type === "shape" || selected?.type === "graphic") && (
+          <input
+            type="number"
+            min={0.1}
+            max={1}
+            step={0.05}
+            value={(selected.style as { opacity?: number } | null)?.opacity ?? 1}
+            onChange={(e) =>
+              updateElement(selected.id, {
+                style: { ...(selected.style ?? {}), opacity: Number(e.target.value) },
+              })
+            }
+            className="input !w-16 !px-2 !py-1 text-sm"
+            title="Opacity"
+          />
         )}
 
         <div className="ml-auto flex gap-2">
@@ -617,6 +813,83 @@ function ElementNode({
   const h = el.height * pageH;
 
   const img = useAssetImage(el.photoId);
+
+  if (el.type === "shape") {
+    const s = (el.style ?? {}) as {
+      shape?: string;
+      fill?: string;
+      stroke?: string;
+      strokeWidth?: number;
+      opacity?: number;
+      radius?: number;
+    };
+    const fill = s.fill && s.fill !== "none" ? s.fill : undefined;
+    const stroke = s.stroke ?? "#0f172a";
+    const sw = Math.max(1, s.strokeWidth ?? 2);
+    let shapeNode: React.ReactNode;
+    if (s.shape === "ellipse") {
+      shapeNode = <Ellipse x={w / 2} y={h / 2} radiusX={Math.max(1, w / 2 - sw / 2)} radiusY={Math.max(1, h / 2 - sw / 2)} fill={fill} stroke={stroke} strokeWidth={sw} />;
+    } else if (s.shape === "line") {
+      shapeNode = <Line points={[sw / 2, h / 2, w - sw / 2, h / 2]} stroke={stroke} strokeWidth={sw} lineCap="round" />;
+    } else if (s.shape === "arrow") {
+      shapeNode = <Arrow points={[sw / 2, h / 2, w - 10, h / 2]} stroke={stroke} strokeWidth={sw} pointerLength={Math.min(14, h)} pointerWidth={Math.min(14, h)} fill={stroke} />;
+    } else if (s.shape === "star") {
+      const r = Math.min(w, h) / 2 - sw / 2;
+      shapeNode = <Star x={w / 2} y={h / 2} numPoints={5} innerRadius={r * 0.42} outerRadius={r} fill={fill ?? stroke} stroke={stroke} strokeWidth={sw} />;
+    } else {
+      shapeNode = <Rect width={w} height={h} cornerRadius={Math.min(s.radius ?? 0, w / 2, h / 2)} fill={fill ?? stroke} stroke={stroke} strokeWidth={sw} />;
+    }
+    return (
+      <Group
+        ref={nodeRef}
+        x={x}
+        y={y}
+        width={w}
+        height={h}
+        rotation={el.rotation}
+        opacity={s.opacity ?? 1}
+        draggable
+        onClick={onSelect}
+        onTap={onSelect}
+        onDragEnd={onDragEnd}
+        onTransformEnd={onTransformEnd}
+      >
+        {shapeNode}
+        {selected && <Rect width={w} height={h} stroke="#5b5bd6" strokeWidth={1} listening={false} />}
+      </Group>
+    );
+  }
+
+  if (el.type === "graphic") {
+    const g = findGraphic((el.style as { graphicId?: string } | null)?.graphicId ?? "");
+    const color = (el.style as { color?: string } | null)?.color ?? "#0f172a";
+    const opacity = (el.style as { opacity?: number } | null)?.opacity ?? 1;
+    return (
+      <Group
+        ref={nodeRef}
+        x={x}
+        y={y}
+        width={w}
+        height={h}
+        rotation={el.rotation}
+        opacity={opacity}
+        draggable
+        onClick={onSelect}
+        onTap={onSelect}
+        onDragEnd={onDragEnd}
+        onTransformEnd={onTransformEnd}
+      >
+        {g && (
+          <Group scaleX={w / g.w} scaleY={h / g.h}>
+            {g.paths.map((p, i) => (
+              <Path key={i} data={p.d} fill={p.mode === "stroke" ? undefined : color} stroke={color} strokeWidth={Math.max(1, (2 * g.w) / 100)} lineJoin="round" />
+            ))}
+          </Group>
+        )}
+        {selected && <Rect width={w} height={h} stroke="#5b5bd6" strokeWidth={1} listening={false} />}
+      </Group>
+    );
+  }
 
   if (el.type === "text" || el.type === "background") {
     const content = (el.text as { content?: string } | null)?.content ?? "";

@@ -2,6 +2,7 @@
 import { PDFDocument, StandardFonts, degrees, rgb } from "pdf-lib";
 import { isSpreadLayout } from "./engine/layouts";
 import { patternDataUri } from "./patterns";
+import { findGraphic, type GraphicStyle, type ShapeStyle } from "./designs";
 
 const MM_PER_INCH = 25.4;
 const PT_PER_MM = 72 / MM_PER_INCH;
@@ -45,7 +46,7 @@ async function drawBackground(
   try {
     const img = new Image();
     img.src = uri;
-    await new Promise<void>((resolve, reject) => {
+    await new Promise<void>((resolve) => {
       img.onload = () => resolve();
       img.onerror = () => resolve();
     });
@@ -57,6 +58,106 @@ async function drawBackground(
   } catch {
     /* pattern is decorative */
   }
+}
+
+function drawVectorElement(
+  ctx: CanvasRenderingContext2D,
+  el: ExportElement,
+  bx: number,
+  by: number,
+  bw: number,
+  bh: number,
+): void {
+  ctx.save();
+  ctx.translate(bx + bw / 2, by + bh / 2);
+  if (el.rotation) ctx.rotate((el.rotation * Math.PI) / 180);
+  ctx.translate(-bw / 2, -bh / 2);
+  ctx.globalAlpha = 1;
+
+  if (el.type === "shape") {
+    const s = (el.style ?? {}) as ShapeStyle;
+    ctx.globalAlpha = s.opacity ?? 1;
+    ctx.fillStyle = s.fill && s.fill !== "none" ? s.fill : "rgba(0,0,0,0)";
+    ctx.strokeStyle = s.stroke && s.stroke !== "none" ? s.stroke : "#0f172a";
+    ctx.lineWidth = Math.max(1, s.strokeWidth ?? 2);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    if (s.shape === "ellipse") {
+      ctx.beginPath();
+      ctx.ellipse(bw / 2, bh / 2, Math.max(0.5, bw / 2 - ctx.lineWidth / 2), Math.max(0.5, bh / 2 - ctx.lineWidth / 2), 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    } else if (s.shape === "line") {
+      ctx.beginPath();
+      ctx.moveTo(ctx.lineWidth / 2, bh / 2);
+      ctx.lineTo(bw - ctx.lineWidth / 2, bh / 2);
+      ctx.stroke();
+    } else if (s.shape === "arrow") {
+      const head = Math.min(14, bh, bw);
+      ctx.beginPath();
+      ctx.moveTo(ctx.lineWidth / 2, bh / 2);
+      ctx.lineTo(bw - head, bh / 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(bw - head, bh / 2 - head / 2);
+      ctx.lineTo(bw - ctx.lineWidth / 2, bh / 2);
+      ctx.lineTo(bw - head, bh / 2 + head / 2);
+      ctx.closePath();
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.fill();
+    } else if (s.shape === "star") {
+      const cx = bw / 2;
+      const cy = bh / 2;
+      const rO = Math.min(bw, bh) / 2 - ctx.lineWidth / 2;
+      const rI = rO * 0.42;
+      ctx.beginPath();
+      for (let i = 0; i < 10; i++) {
+        const r = i % 2 === 0 ? rO : rI;
+        const a = (Math.PI / 5) * i - Math.PI / 2;
+        if (i === 0) ctx.moveTo(cx + r * Math.cos(a), cy + r * Math.sin(a));
+        else ctx.lineTo(cx + r * Math.cos(a), cy + r * Math.sin(a));
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      const r = Math.min(s.radius ?? 0, bw / 2, bh / 2);
+      ctx.beginPath();
+      if (typeof (ctx as CanvasRenderingContext2D & { roundRect?: unknown }).roundRect === "function") {
+        (ctx as CanvasRenderingContext2D & { roundRect: (x: number, y: number, w: number, h: number, r: number) => void }).roundRect(
+          ctx.lineWidth / 2, ctx.lineWidth / 2, Math.max(1, bw - ctx.lineWidth), Math.max(1, bh - ctx.lineWidth), r,
+        );
+      } else {
+        ctx.rect(ctx.lineWidth / 2, ctx.lineWidth / 2, Math.max(1, bw - ctx.lineWidth), Math.max(1, bh - ctx.lineWidth));
+      }
+      ctx.fill();
+      ctx.stroke();
+    }
+  } else if (el.type === "graphic") {
+    const gs = (el.style ?? {}) as GraphicStyle;
+    const g = findGraphic(gs.graphicId);
+    ctx.globalAlpha = gs.opacity ?? 1;
+    if (!g) {
+      ctx.restore();
+      return;
+    }
+    const color = gs.color ?? "#0f172a";
+    ctx.fillStyle = color;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = Math.max(1, bw / 80);
+    ctx.save();
+    ctx.scale(bw / g.w, bh / g.h);
+    for (const p of g.paths) {
+      const path = new Path2D(p.d);
+      if (p.mode === "stroke") {
+        ctx.stroke(path);
+      } else {
+        ctx.fill(path);
+      }
+    }
+    ctx.restore();
+  }
+  ctx.restore();
 }
 
 async function renderPageJpeg(
@@ -76,6 +177,17 @@ async function renderPageJpeg(
 
   const elements = page.elements.slice().sort((a, b) => a.z - b.z);
   for (const el of elements) {
+    if (el.type === "shape" || el.type === "graphic") {
+      drawVectorElement(
+        ctx,
+        el,
+        bleedPx + el.x * pageWpx,
+        bleedPx + el.y * pageHpx,
+        el.width * pageWpx,
+        el.height * pageHpx,
+      );
+      continue;
+    }
     if (el.type !== "image" || !el.photoId) continue;
     const { image } = await resolvePhoto(el.photoId);
 
@@ -145,6 +257,17 @@ async function renderSpreadCanvas(
 
   const elements = page.elements.slice().sort((a, b) => a.z - b.z);
   for (const el of elements) {
+    if (el.type === "shape" || el.type === "graphic") {
+      drawVectorElement(
+        ctx,
+        el,
+        bleedPx + el.x * spreadWpx,
+        bleedPx + el.y * pageHpx,
+        el.width * spreadWpx,
+        el.height * pageHpx,
+      );
+      continue;
+    }
     if (el.type !== "image" || !el.photoId) continue;
     const { image } = await resolvePhoto(el.photoId);
 

@@ -6,6 +6,7 @@ import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { isSpreadLayout } from "./engine/layouts";
 import { backgroundCanvasSvg } from "../shared/patterns";
+import { graphicSvg, shapeSvg, type GraphicStyle, type ShapeStyle } from "../shared/designs";
 
 const MM_PER_INCH = 25.4;
 const PT_PER_MM = 72 / MM_PER_INCH;
@@ -38,6 +39,25 @@ export interface ExportPage {
 
 export type PhotoResolver = (id: string) => ResolvedPhoto;
 
+/** SVG for a vector (shape/graphic) element sized to its canvas box. */
+function vectorElementSvg(
+  el: ExportElement,
+  pageWpx: number,
+  pageHpx: number,
+  _bleedPx: number,
+): string {
+  const w = Math.max(1, Math.round(el.width * pageWpx));
+  const h = Math.max(1, Math.round(el.height * pageHpx));
+  if (el.type === "shape") {
+    const style = (el.style ?? {}) as ShapeStyle;
+    return shapeSvg(style, w, h, el.rotation);
+  }
+  const style = (el.style ?? {}) as GraphicStyle;
+  const color = style.color ?? "#0f172a";
+  const strokeW = Math.max(1, Math.round(w / 80));
+  return graphicSvg(style.graphicId ?? "", color, w, h, style.opacity ?? 1, strokeW);
+}
+
 export async function renderPageJpeg(
   page: ExportPage,
   resolvePhoto: PhotoResolver,
@@ -53,6 +73,17 @@ export async function renderPageJpeg(
 
   const elements = page.elements.slice().sort((a, b) => a.z - b.z);
   for (const el of elements) {
+    if (el.type === "shape" || el.type === "graphic") {
+      const svg = vectorElementSvg(el, pageWpx, pageHpx, bleedPx);
+      if (!svg) continue;
+      const buf = await sharp(Buffer.from(svg)).png().toBuffer();
+      composites.push({
+        input: buf,
+        left: Math.round(bleedPx + el.x * pageWpx),
+        top: Math.round(bleedPx + el.y * pageHpx),
+      });
+      continue;
+    }
     if (el.type !== "image" || !el.photoId) continue;
     const photo = resolvePhoto(el.photoId);
 
@@ -133,6 +164,17 @@ export async function renderSpreadJpegs(
 
   const elements = page.elements.slice().sort((a, b) => a.z - b.z);
   for (const el of elements) {
+    if (el.type === "shape" || el.type === "graphic") {
+      const svg = vectorElementSvg(el, spreadWpx, pageHpx, bleedPx);
+      if (!svg) continue;
+      const buf = await sharp(Buffer.from(svg)).png().toBuffer();
+      composites.push({
+        input: buf,
+        left: Math.round(bleedPx + el.x * spreadWpx),
+        top: Math.round(bleedPx + el.y * pageHpx),
+      });
+      continue;
+    }
     if (el.type !== "image" || !el.photoId) continue;
     const photo = resolvePhoto(el.photoId);
 

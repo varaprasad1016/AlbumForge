@@ -83,7 +83,7 @@ export interface CropRect {
 
 export interface AlbumElement {
   id: string;
-  type: "image" | "text" | "background";
+  type: "image" | "text" | "background" | "shape" | "graphic";
   z: number;
   x: number;
   y: number;
@@ -185,6 +185,14 @@ export const LAB_PRESETS: LabPreset[] = [
     bleedMm: 0,
     colorMode: "rgb",
   },
+  {
+    id: "ultra_600",
+    name: "Ultra high-res (600 DPI)",
+    description: "600 DPI for large-format and fine-art reproduction.",
+    dpi: 600,
+    bleedMm: 3,
+    colorMode: "rgb",
+  },
 ];
 
 export interface AppInfo {
@@ -236,7 +244,7 @@ export interface PageUpdate {
   layoutKey?: string | null;
   background?: Record<string, unknown> | null;
   elements?: Array<{
-    type: "image" | "text" | "background";
+    type: "image" | "text" | "background" | "shape" | "graphic";
     z: number;
     x: number;
     y: number;
