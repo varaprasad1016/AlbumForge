@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { AppInfo, UpdateEvent } from "@shared/api";
+import { useTheme } from "../lib/theme";
 
 type UpdatePhase = "idle" | "checking" | "uptodate" | "available" | "downloading" | "downloaded" | "error";
 
@@ -10,6 +11,7 @@ export default function SettingsPage() {
   const [percent, setPercent] = useState(0);
   const [error, setError] = useState("");
   const [cacheCleared, setCacheCleared] = useState(false);
+  const { dark, toggle } = useTheme();
 
   useEffect(() => {
     window.albumforge.info().then(setInfo);
@@ -125,6 +127,25 @@ export default function SettingsPage() {
                 )}
               </div>
             )}
+          </div>
+        </section>
+
+        <section className="card p-4">
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Appearance</h2>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium text-ink">Dark mode</p>
+              <p className="text-xs text-slate-400">Switch between light and dark themes</p>
+            </div>
+            <button
+              onClick={toggle}
+              className={`relative h-7 w-12 rounded-full transition-colors ${dark ? "bg-indigo-500" : "bg-slate-300"}`}
+              title={dark ? "Switch to light mode" : "Switch to dark mode"}
+            >
+              <span
+                className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all ${dark ? "left-6" : "left-1"}`}
+              />
+            </button>
           </div>
         </section>
 

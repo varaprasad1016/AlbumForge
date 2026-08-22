@@ -2,6 +2,68 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --brand: 99 102 241;
+  --ink: 15 23 42;
+  --surface: 255 255 255;
+
+  --slate-50: 248 250 252;
+  --slate-100: 241 245 249;
+  --slate-200: 226 232 240;
+  --slate-300: 203 213 225;
+  --slate-400: 148 163 184;
+  --slate-500: 100 116 139;
+  --slate-600: 71 85 105;
+  --slate-700: 51 65 85;
+  --slate-800: 30 41 59;
+  --slate-900: 15 23 42;
+
+  --neutral-200: 229 229 229;
+
+  --indigo-50: 238 242 255;
+  --indigo-100: 224 231 255;
+  --indigo-600: 79 70 229;
+  --violet-100: 237 233 254;
+  --amber-50: 255 251 235;
+  --amber-600: 217 119 6;
+  --emerald-50: 236 253 245;
+  --emerald-600: 5 150 105;
+  --emerald-700: 4 120 87;
+  --red-50: 254 242 242;
+  --red-600: 220 38 38;
+}
+
+.dark {
+  --brand: 129 140 248;
+  --ink: 226 232 240;
+  --surface: 30 41 59;
+
+  --slate-50: 15 23 42;
+  --slate-100: 30 41 59;
+  --slate-200: 51 65 85;
+  --slate-300: 71 85 105;
+  --slate-400: 100 116 139;
+  --slate-500: 148 163 184;
+  --slate-600: 203 213 225;
+  --slate-700: 226 232 240;
+  --slate-800: 241 245 249;
+  --slate-900: 248 250 252;
+
+  --neutral-200: 51 65 85;
+
+  --indigo-50: 49 46 129;
+  --indigo-100: 67 56 202;
+  --indigo-600: 165 180 252;
+  --violet-100: 109 40 217;
+  --amber-50: 120 53 15;
+  --amber-600: 251 191 36;
+  --emerald-50: 6 78 59;
+  --emerald-600: 52 211 153;
+  --emerald-700: 110 231 183;
+  --red-50: 69 10 10;
+  --red-600: 248 113 113;
+}
+
 html,
 body,
 #root {
@@ -18,7 +80,7 @@ body {
 
 @layer components {
   .card {
-    @apply rounded-2xl border border-slate-200/70 bg-white shadow-card;
+    @apply rounded-2xl border border-slate-200/70 bg-surface shadow-card;
   }
 
   .btn-primary {
@@ -26,11 +88,11 @@ body {
   }
 
   .btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition-all duration-150 hover:bg-slate-50 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-surface px-4 py-2 text-sm font-semibold text-slate-700 transition-all duration-150 hover:bg-slate-100 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 disabled:cursor-not-allowed disabled:opacity-50;
   }
 
   .input {
-    @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 transition-colors focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100;
+    @apply w-full rounded-lg border border-slate-300 bg-surface px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 transition-colors focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100;
   }
 
   .field-label {
