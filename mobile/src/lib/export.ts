@@ -21,7 +21,7 @@ export interface ExportElement {
   rotation: number;
   crop: { x: number; y: number; width: number; height: number } | null;
   text: { content?: string } | null;
-  style: { color?: string; fontSize?: number; fontFamily?: string } | null;
+  style: Record<string, unknown> | null;
   z: number;
 }
 
@@ -60,14 +60,30 @@ async function drawBackground(
   }
 }
 
-function drawVectorElement(
+const assetImageCache = new Map<string, Promise<HTMLImageElement | null>>();
+
+function loadAssetImage(uri: string): Promise<HTMLImageElement | null> {
+  let p = assetImageCache.get(uri);
+  if (!p) {
+    p = new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = uri;
+    });
+    assetImageCache.set(uri, p);
+  }
+  return p;
+}
+
+async function drawVectorElement(
   ctx: CanvasRenderingContext2D,
   el: ExportElement,
   bx: number,
   by: number,
   bw: number,
   bh: number,
-): void {
+): Promise<void> {
   ctx.save();
   ctx.translate(bx + bw / 2, by + bh / 2);
   if (el.rotation) ctx.rotate((el.rotation * Math.PI) / 180);
@@ -134,9 +150,15 @@ function drawVectorElement(
       ctx.stroke();
     }
   } else if (el.type === "graphic") {
-    const gs = (el.style ?? {}) as GraphicStyle;
-    const g = findGraphic(gs.graphicId);
+    const gs = (el.style ?? {}) as GraphicStyle & { assetUri?: string };
     ctx.globalAlpha = gs.opacity ?? 1;
+    if (gs.assetUri) {
+      const img = await loadAssetImage(gs.assetUri);
+      if (img) ctx.drawImage(img, 0, 0, bw, bh);
+      ctx.restore();
+      return;
+    }
+    const g = findGraphic(gs.graphicId);
     if (!g) {
       ctx.restore();
       return;
@@ -178,7 +200,7 @@ async function renderPageJpeg(
   const elements = page.elements.slice().sort((a, b) => a.z - b.z);
   for (const el of elements) {
     if (el.type === "shape" || el.type === "graphic") {
-      drawVectorElement(
+      await drawVectorElement(
         ctx,
         el,
         bleedPx + el.x * pageWpx,
@@ -258,7 +280,7 @@ async function renderSpreadCanvas(
   const elements = page.elements.slice().sort((a, b) => a.z - b.z);
   for (const el of elements) {
     if (el.type === "shape" || el.type === "graphic") {
-      drawVectorElement(
+      await drawVectorElement(
         ctx,
         el,
         bleedPx + el.x * spreadWpx,

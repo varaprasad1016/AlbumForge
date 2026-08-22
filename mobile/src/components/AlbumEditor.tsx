@@ -14,7 +14,7 @@ import {
   Transformer,
 } from "react-konva";
 import type Konva from "konva";
-import type { AlbumElement, AlbumPage, PageSize } from "@shared/api";
+import type { AlbumElement, AlbumPage, DesignAsset, PageDesign, PageSize } from "@shared/api";
 import { PAGE_PATTERNS, patternDataUri } from "../lib/patterns";
 import { findGraphic, GRAPHICS, type ShapeKind } from "../lib/designs";
 import PhotoPicker from "./PhotoPicker";
@@ -106,6 +106,13 @@ export default function AlbumEditor({
   const [saving, setSaving] = useState(false);
   const [picker, setPicker] = useState<"add" | "replace" | null>(null);
   const [prompt, setPrompt] = useState<{ title: string; initial: string; onConfirm: (v: string) => void } | null>(null);
+  const [assets, setAssets] = useState<DesignAsset[]>([]);
+  const [designs, setDesigns] = useState<PageDesign[]>([]);
+
+  useEffect(() => {
+    window.albumforge.assets.list().then(setAssets);
+    window.albumforge.designs.list().then(setDesigns);
+  }, []);
 
   const trRef = useRef<Konva.Transformer>(null);
   const nodeRefs = useRef<Record<string, Konva.Group | null>>({});
@@ -278,11 +285,20 @@ export default function AlbumEditor({
   }
 
   function addGraphic(graphicId: string) {
-    const g = findGraphic(graphicId);
-    if (!g) return;
     const maxZ = elements.reduce((m, e) => Math.max(m, e.z), -1);
-    const w = 0.4;
-    const h = w * (g.h / g.w);
+    let w = 0.4;
+    let h = 0.4;
+    let style: Record<string, unknown> = {};
+    if (graphicId.startsWith("asset:")) {
+      const asset = assets.find((a) => a.id === graphicId.slice(6));
+      if (!asset) return;
+      style = { graphicId, assetUri: asset.dataUri, color: null, opacity: 1 };
+    } else {
+      const g = findGraphic(graphicId);
+      if (!g) return;
+      h = w * (g.h / g.w);
+      style = { graphicId, color: "#6366f1", opacity: 1 };
+    }
     const el: AlbumElement = {
       id: `new-${Date.now()}`,
       type: "graphic",
@@ -295,9 +311,69 @@ export default function AlbumEditor({
       photoId: null,
       crop: null,
       text: null,
-      style: { graphicId, color: "#6366f1", opacity: 1 },
+      style,
     };
     void persist(mutateElements([...elements, el]));
+  }
+
+  async function importAssets() {
+    const files = await window.albumforge.dialogs.chooseAssets();
+    if (!files || files.length === 0) return;
+    await window.albumforge.assets.importAssets(files);
+    setAssets(await window.albumforge.assets.list());
+  }
+
+  function saveDesign() {
+    setPrompt({
+      title: "Save page as design",
+      initial: "My design",
+      onConfirm: async (name) => {
+        if (!name.trim()) return;
+        await window.albumforge.designs.save(name.trim(), {
+          layoutKey: page.layoutKey,
+          background: page.background,
+          elements: page.elements.map((e) => ({
+            type: e.type,
+            z: e.z,
+            x: e.x,
+            y: e.y,
+            width: e.width,
+            height: e.height,
+            rotation: e.rotation,
+            photoId: e.type === "image" ? null : e.photoId,
+            crop: e.type === "image" ? null : e.crop,
+            text: e.text,
+            style: e.style,
+          })),
+        });
+        setDesigns(await window.albumforge.designs.list());
+      },
+    });
+  }
+
+  async function applyDesign(designId: string) {
+    const d = await window.albumforge.designs.get(designId);
+    if (!d || !page) return;
+    const keepImages = elements.filter((e) => e.type === "image");
+    const designImages = (d.elements ?? []).filter((e) => e.type === "image");
+    const merged = (d.elements ?? []).map((e) => {
+      if (e.type === "image") {
+        const photo = keepImages[Math.min(designImages.indexOf(e), keepImages.length - 1)];
+        if (photo && designImages.indexOf(e) < keepImages.length) {
+          return { ...e, photoId: photo.photoId, crop: photo.crop };
+        }
+        return { ...e, photoId: null, crop: null };
+      }
+      return e;
+    });
+    const updated = await window.albumforge.albums.savePage(albumId, page.id, {
+      layoutKey: page.layoutKey,
+      background: d.background,
+      elements: merged.map((e) => ({ ...e, z: e.z ?? 0 })),
+    });
+    setPagesState((prev) => prev.map((p) => (p.id === page.id ? updated : p)));
+    setSelectedId(null);
+    onPageUpdated(updated);
   }
 
   function moveSelectedZ(delta: number) {
@@ -532,7 +608,39 @@ export default function AlbumEditor({
               {g.name}
             </option>
           ))}
+          {assets.length > 0 && <option disabled>— your graphics —</option>}
+          {assets.map((a) => (
+            <option key={a.id} value={`asset:${a.id}`}>
+              {a.name}
+            </option>
+          ))}
         </select>
+
+        <button onClick={importAssets} className="btn-secondary !px-2.5 !py-1 text-xs" title="Import SVG or PNG graphics">
+          Import…
+        </button>
+
+        <button onClick={saveDesign} className="btn-secondary !px-2.5 !py-1 text-xs" title="Save this page layout as a reusable design">
+          Save design
+        </button>
+
+        {designs.length > 0 && (
+          <select
+            value=""
+            onChange={(e) => {
+              if (e.target.value) void applyDesign(e.target.value);
+            }}
+            className="input !w-auto !px-2 !py-1 text-sm"
+            title="Apply a saved page design"
+          >
+            <option value="">Apply design…</option>
+            {designs.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+        )}
 
         {selected && (
           <>
@@ -861,9 +969,11 @@ function ElementNode({
   }
 
   if (el.type === "graphic") {
-    const g = findGraphic((el.style as { graphicId?: string } | null)?.graphicId ?? "");
-    const color = (el.style as { color?: string } | null)?.color ?? "#0f172a";
-    const opacity = (el.style as { opacity?: number } | null)?.opacity ?? 1;
+    const style = (el.style ?? {}) as { graphicId?: string; color?: string; opacity?: number; assetUri?: string };
+    const color = style.color ?? "#0f172a";
+    const opacity = style.opacity ?? 1;
+    const assetImg = useAssetImageFromUri(style.assetUri ?? null);
+    const g = style.assetUri ? undefined : findGraphic(style.graphicId ?? "");
     return (
       <Group
         ref={nodeRef}
@@ -886,6 +996,7 @@ function ElementNode({
             ))}
           </Group>
         )}
+        {assetImg && <KImage image={assetImg} width={w} height={h} />}
         {selected && <Rect width={w} height={h} stroke="#5b5bd6" strokeWidth={1} listening={false} />}
       </Group>
     );

@@ -112,6 +112,16 @@ export async function initBackend(): Promise<void> {
           input.oncancel = () => resolve(null);
           input.click();
         }),
+      chooseAssets: () =>
+        new Promise<File[] | null>((resolve) => {
+          const input = document.createElement("input");
+          input.type = "file";
+          input.accept = "image/svg+xml,image/png,.svg,.png";
+          input.multiple = true;
+          input.onchange = () => resolve(input.files ? Array.from(input.files) : null);
+          input.oncancel = () => resolve(null);
+          input.click();
+        }),
       chooseSavePath: () => Promise.resolve(null),
     },
     ...buildCrudApi(),

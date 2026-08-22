@@ -218,5 +218,81 @@ export function buildCrudApi(): any {
     fonts: {
       list: async () => BUNDLED_FONTS,
     },
+    assets: {
+      list: async () =>
+        all("SELECT id, name, kind, data FROM assets ORDER BY created_at").map((r: any) => ({
+          id: r.id,
+          name: r.name,
+          kind: r.kind,
+          dataUri: r.data,
+        })),
+      importAssets: async (files: File[]) => {
+        let imported = 0;
+        let failed = 0;
+        for (const file of files) {
+          try {
+            if (file.size > 2 * 1024 * 1024) {
+              failed++;
+              continue;
+            }
+            const lower = file.name.toLowerCase();
+            let kind: "svg" | "png";
+            let dataUri: string;
+            if (lower.endsWith(".svg")) {
+              kind = "svg";
+              dataUri = `data:image/svg+xml;utf8,${encodeURIComponent(await file.text())}`;
+            } else if (lower.endsWith(".png")) {
+              kind = "png";
+              const buf = new Uint8Array(await file.arrayBuffer());
+              let binary = "";
+              const chunk = 0x8000;
+              for (let i = 0; i < buf.length; i += chunk) {
+                binary += String.fromCharCode.apply(null, Array.from(buf.subarray(i, i + chunk)) as unknown as number[]);
+              }
+              dataUri = `data:image/png;base64,${btoa(binary)}`;
+            } else {
+              failed++;
+              continue;
+            }
+            run("INSERT INTO assets (id, name, kind, data, created_at) VALUES (?, ?, ?, ?, ?)", [
+              newId(), file.name, kind, dataUri, now(),
+            ]);
+            imported++;
+          } catch {
+            failed++;
+          }
+        }
+        await persistDb();
+        return { imported, failed };
+      },
+      remove: async (id: string) => {
+        run("DELETE FROM assets WHERE id = ?", [id]);
+        await persistDb();
+      },
+    },
+    designs: {
+      list: async () =>
+        all("SELECT id, name, created_at FROM designs ORDER BY created_at DESC").map((r: any) => ({
+          id: r.id,
+          name: r.name,
+          createdAt: r.created_at,
+        })),
+      save: async (name: string, page: any) => {
+        const id = newId();
+        run("INSERT INTO designs (id, name, layout_json, created_at) VALUES (?, ?, ?, ?)", [
+          id, name, JSON.stringify(page), now(),
+        ]);
+        await persistDb();
+        return { id, name, createdAt: now() };
+      },
+      get: async (id: string) => {
+        const row = get("SELECT layout_json FROM designs WHERE id = ?", [id]) as { layout_json: string } | undefined;
+        return row ? JSON.parse(row.layout_json) : null;
+      },
+      remove: async (id: string) => {
+        run("DELETE FROM designs WHERE id = ?", [id]);
+        await persistDb();
+      },
+    },
   };
 }

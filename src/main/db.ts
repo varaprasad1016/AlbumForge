@@ -157,6 +157,21 @@ CREATE TABLE IF NOT EXISTS photo_notes (
   comment TEXT,
   created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS assets (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  data TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS designs (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  layout_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
 `;
 
 export function initDatabase(dbPath: string): DB {

@@ -230,6 +230,25 @@ export interface GeoPoint {
   takenAt: string | null;
 }
 
+export interface DesignAsset {
+  id: string;
+  name: string;
+  kind: "svg" | "png";
+  dataUri: string;
+}
+
+export interface PageDesign {
+  id: string;
+  name: string;
+  createdAt: string;
+}
+
+export interface DesignPageData {
+  layoutKey: string | null;
+  background: Record<string, unknown> | null;
+  elements: PageUpdate["elements"];
+}
+
 export interface GenerateInput {
   projectId: string;
   templateId: string;
@@ -272,6 +291,7 @@ export interface AlbumForgeApi {
     chooseSavePath(defaultName: string): Promise<string | null>;
     chooseDirectory(): Promise<string | null>;
     chooseFeedback(): Promise<string | null>;
+    chooseAssets(): Promise<string[] | null>;
   };
   projects: {
     list(): Promise<Project[]>;
@@ -353,5 +373,16 @@ export interface AlbumForgeApi {
       filePath: string,
     ): Promise<{ favorited: number; commented: number }>;
     notes(projectId: string): Promise<Array<{ photoId: string; filename: string; comment: string }>>;
+  };
+  assets: {
+    list(): Promise<DesignAsset[]>;
+    importAssets(paths: string[]): Promise<{ imported: number; failed: number }>;
+    remove(id: string): Promise<void>;
+  };
+  designs: {
+    list(): Promise<PageDesign[]>;
+    save(name: string, page: DesignPageData): Promise<PageDesign>;
+    get(id: string): Promise<DesignPageData | null>;
+    remove(id: string): Promise<void>;
   };
 }

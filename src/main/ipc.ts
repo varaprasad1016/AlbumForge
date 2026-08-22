@@ -1,7 +1,7 @@
 /** IPC handlers: the entire application surface exposed to the renderer. */
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { autoUpdater } from "electron-updater";
-import { mkdirSync, rmSync, statSync, writeFileSync } from "fs";
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
 import { basename, extname, join } from "path";
 import { DB, newId, now } from "./db";
 import { analyzeImage, extractGps, extractTimestamp, generateThumbnails, imageInfo } from "./imaging";
@@ -206,6 +206,100 @@ export function registerIpc(ctx: IpcContext): void {
       filters: [{ name: "Feedback", extensions: ["json"] }],
     });
     return res.canceled ? null : (res.filePaths[0] ?? null);
+  });
+
+  ipcMain.handle("dialogs:chooseAssets", async () => {
+    const win = getWindow();
+    const res = await dialog.showOpenDialog(win!, {
+      properties: ["openFile", "multiSelections"],
+      filters: [{ name: "Graphics", extensions: ["svg", "png"] }],
+    });
+    return res.canceled ? null : res.filePaths;
+  });
+
+  // ---- Assets (custom graphics) --------------------------------------------
+  ipcMain.handle("assets:list", () => {
+    const rows = db.prepare("SELECT id, name, kind, data FROM assets ORDER BY created_at").all() as Array<
+      Record<string, unknown>
+    >;
+    return rows.map((r) => ({
+      id: r.id as string,
+      name: r.name as string,
+      kind: r.kind as "svg" | "png",
+      dataUri: r.data as string,
+    }));
+  });
+
+  ipcMain.handle("assets:import", (_e, paths: string[]) => {
+    let imported = 0;
+    let failed = 0;
+    const insert = db.prepare("INSERT INTO assets (id, name, kind, data, created_at) VALUES (?, ?, ?, ?, ?)");
+    for (const p of paths) {
+      try {
+        const st = statSync(p);
+        if (st.size > 2 * 1024 * 1024) {
+          failed++;
+          continue;
+        }
+        const ext = extname(p).toLowerCase();
+        const buf = readFileSync(p);
+        let kind: "svg" | "png";
+        let dataUri: string;
+        if (ext === ".svg") {
+          kind = "svg";
+          dataUri = `data:image/svg+xml;utf8,${encodeURIComponent(buf.toString("utf8"))}`;
+        } else if (ext === ".png") {
+          kind = "png";
+          dataUri = `data:image/png;base64,${buf.toString("base64")}`;
+        } else {
+          failed++;
+          continue;
+        }
+        insert.run(newId(), basename(p), kind, dataUri, now());
+        imported++;
+      } catch {
+        failed++;
+      }
+    }
+    return { imported, failed };
+  });
+
+  ipcMain.handle("assets:remove", (_e, id: string) => {
+    db.prepare("DELETE FROM assets WHERE id = ?").run(id);
+  });
+
+  // ---- Designs (reusable page designs) -------------------------------------
+  ipcMain.handle("designs:list", () => {
+    const rows = db.prepare("SELECT id, name, created_at FROM designs ORDER BY created_at DESC").all() as Array<
+      Record<string, unknown>
+    >;
+    return rows.map((r) => ({
+      id: r.id as string,
+      name: r.name as string,
+      createdAt: r.created_at as string,
+    }));
+  });
+
+  ipcMain.handle("designs:save", (_e, name: string, page: unknown) => {
+    const id = newId();
+    db.prepare("INSERT INTO designs (id, name, layout_json, created_at) VALUES (?, ?, ?, ?)").run(
+      id,
+      name,
+      JSON.stringify(page),
+      now(),
+    );
+    return { id, name, createdAt: now() };
+  });
+
+  ipcMain.handle("designs:get", (_e, id: string) => {
+    const row = db.prepare("SELECT layout_json FROM designs WHERE id = ?").get(id) as
+      | { layout_json: string }
+      | undefined;
+    return row ? JSON.parse(row.layout_json) : null;
+  });
+
+  ipcMain.handle("designs:remove", (_e, id: string) => {
+    db.prepare("DELETE FROM designs WHERE id = ?").run(id);
   });
 
   // ---- Client proofing -----------------------------------------------------

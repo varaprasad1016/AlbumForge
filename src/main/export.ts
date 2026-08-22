@@ -27,7 +27,7 @@ export interface ExportElement {
   rotation: number;
   crop: { x: number; y: number; width: number; height: number } | null;
   text: { content?: string } | null;
-  style: { color?: string; fontSize?: number; fontFamily?: string } | null;
+  style: Record<string, unknown> | null;
   z: number;
 }
 
@@ -49,13 +49,32 @@ function vectorElementSvg(
   const w = Math.max(1, Math.round(el.width * pageWpx));
   const h = Math.max(1, Math.round(el.height * pageHpx));
   if (el.type === "shape") {
-    const style = (el.style ?? {}) as ShapeStyle;
+    const style = (el.style ?? {}) as unknown as ShapeStyle;
     return shapeSvg(style, w, h, el.rotation);
   }
-  const style = (el.style ?? {}) as GraphicStyle;
+  const style = (el.style ?? {}) as unknown as GraphicStyle;
   const color = style.color ?? "#0f172a";
   const strokeW = Math.max(1, Math.round(w / 80));
   return graphicSvg(style.graphicId ?? "", color, w, h, style.opacity ?? 1, strokeW);
+}
+
+/** Rasterized buffer for a custom imported asset (SVG/PNG data URI embedded in
+ *  the element style — albums stay self-contained). */
+async function assetElementBuffer(el: ExportElement, w: number, h: number): Promise<Buffer | null> {
+  const uri = ((el.style ?? {}) as unknown as { assetUri?: string } | null)?.assetUri;
+  if (!uri) return null;
+  try {
+    const comma = uri.indexOf(",");
+    let pipeline = uri.startsWith("data:image/svg")
+      ? sharp(Buffer.from(decodeURIComponent(uri.slice(comma + 1))))
+      : sharp(Buffer.from(uri.slice(comma + 1), "base64"));
+    if (el.rotation) {
+      pipeline = pipeline.rotate(el.rotation, { background: { r: 0, g: 0, b: 0, alpha: 0 } });
+    }
+    return await pipeline.resize(Math.max(1, w), Math.max(1, h), { fit: "fill" }).png().toBuffer();
+  } catch {
+    return null;
+  }
 }
 
 export async function renderPageJpeg(
@@ -74,9 +93,16 @@ export async function renderPageJpeg(
   const elements = page.elements.slice().sort((a, b) => a.z - b.z);
   for (const el of elements) {
     if (el.type === "shape" || el.type === "graphic") {
-      const svg = vectorElementSvg(el, pageWpx, pageHpx, bleedPx);
-      if (!svg) continue;
-      const buf = await sharp(Buffer.from(svg)).png().toBuffer();
+      const w = Math.max(1, Math.round(el.width * pageWpx));
+      const h = Math.max(1, Math.round(el.height * pageHpx));
+      let buf: Buffer | null = null;
+      if (el.type === "graphic" && (el.style as { assetUri?: string } | null)?.assetUri) {
+        buf = await assetElementBuffer(el, w, h);
+      } else {
+        const svg = vectorElementSvg(el, pageWpx, pageHpx, bleedPx);
+        if (svg) buf = await sharp(Buffer.from(svg)).png().toBuffer();
+      }
+      if (!buf) continue;
       composites.push({
         input: buf,
         left: Math.round(bleedPx + el.x * pageWpx),
@@ -165,9 +191,16 @@ export async function renderSpreadJpegs(
   const elements = page.elements.slice().sort((a, b) => a.z - b.z);
   for (const el of elements) {
     if (el.type === "shape" || el.type === "graphic") {
-      const svg = vectorElementSvg(el, spreadWpx, pageHpx, bleedPx);
-      if (!svg) continue;
-      const buf = await sharp(Buffer.from(svg)).png().toBuffer();
+      const w = Math.max(1, Math.round(el.width * spreadWpx));
+      const h = Math.max(1, Math.round(el.height * pageHpx));
+      let buf: Buffer | null = null;
+      if (el.type === "graphic" && (el.style as { assetUri?: string } | null)?.assetUri) {
+        buf = await assetElementBuffer(el, w, h);
+      } else {
+        const svg = vectorElementSvg(el, spreadWpx, pageHpx, bleedPx);
+        if (svg) buf = await sharp(Buffer.from(svg)).png().toBuffer();
+      }
+      if (!buf) continue;
       composites.push({
         input: buf,
         left: Math.round(bleedPx + el.x * spreadWpx),
@@ -461,8 +494,9 @@ async function drawTextElements(
       }
     }
 
-    const fontSize = el.style?.fontSize ?? 18;
-    const color = el.style?.color ?? "#000000";
+    const textStyle = (el.style ?? {}) as unknown as { fontSize?: number; color?: string };
+    const fontSize = textStyle.fontSize ?? 18;
+    const color = textStyle.color ?? "#000000";
     const x = (bleedMm + xNorm * widthMm) * PT_PER_MM;
     const y = pageHpt - (bleedMm + el.y * heightMm) * PT_PER_MM - fontSize;
     pdfPage.drawText(content, { x, y, size: fontSize, font, color: hexToPdf(color) });

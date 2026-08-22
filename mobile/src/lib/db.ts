@@ -54,6 +54,15 @@ CREATE TABLE IF NOT EXISTS exports (
   id TEXT PRIMARY KEY, album_id TEXT NOT NULL, kind TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'queued', file_path TEXT, settings TEXT, error TEXT, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS photo_notes (
+  id TEXT PRIMARY KEY, photo_id TEXT NOT NULL UNIQUE, comment TEXT, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS assets (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, data TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS designs (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, layout_json TEXT NOT NULL, created_at TEXT NOT NULL
+);
 `;
 
 export async function initDb(): Promise<void> {

@@ -19,6 +19,7 @@ const api: AlbumForgeApi = {
     chooseSavePath: (defaultName) => ipcRenderer.invoke("dialogs:chooseSavePath", defaultName),
     chooseDirectory: () => ipcRenderer.invoke("dialogs:chooseDirectory"),
     chooseFeedback: () => ipcRenderer.invoke("dialogs:chooseFeedback"),
+    chooseAssets: () => ipcRenderer.invoke("dialogs:chooseAssets"),
   },
   projects: {
     list: () => ipcRenderer.invoke("projects:list"),
@@ -80,6 +81,17 @@ const api: AlbumForgeApi = {
     build: (albumId, targetDir) => ipcRenderer.invoke("proofs:build", albumId, targetDir),
     importFeedback: (projectId, filePath) => ipcRenderer.invoke("proofs:importFeedback", projectId, filePath),
     notes: (projectId) => ipcRenderer.invoke("proofs:notes", projectId),
+  },
+  assets: {
+    list: () => ipcRenderer.invoke("assets:list"),
+    importAssets: (paths) => ipcRenderer.invoke("assets:import", paths),
+    remove: (id) => ipcRenderer.invoke("assets:remove", id),
+  },
+  designs: {
+    list: () => ipcRenderer.invoke("designs:list"),
+    save: (name, page) => ipcRenderer.invoke("designs:save", name, page),
+    get: (id) => ipcRenderer.invoke("designs:get", id),
+    remove: (id) => ipcRenderer.invoke("designs:remove", id),
   },
 };
 
