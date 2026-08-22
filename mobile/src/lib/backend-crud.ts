@@ -1,5 +1,4 @@
 /** Projects, photos, groups, templates and fonts API (mobile). */
-import exifr from "exifr";
 import { all, bytesToBase64, get, newId, now, persistDb, run, writeDataFile } from "./db";
 import { loadImage, phashOf, qualityOf, thumbnails } from "./imaging";
 import { segmentByTime } from "./engine/grouping";
@@ -9,6 +8,7 @@ import { photoDto, photoRecordsFor, projectDto } from "./generate";
 
 async function fileGps(file: File): Promise<{ latitude: number; longitude: number } | null> {
   try {
+    const { default: exifr } = await import("exifr");
     const data = await exifr.parse(file, { gps: true });
     const lat = data?.latitude;
     const lng = data?.longitude;

@@ -1,12 +1,13 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import Nav from "./components/Nav";
 import AlbumsPage from "./pages/AlbumsPage";
 import AlbumPage from "./pages/AlbumPage";
-import MapPage from "./pages/MapPage";
 import ProjectPage from "./pages/ProjectPage";
 import ProjectsPage from "./pages/ProjectsPage";
 import SettingsPage from "./pages/SettingsPage";
 import TemplatesPage from "./pages/TemplatesPage";
+
+const MapPage = lazy(() => import("./pages/MapPage"));
 
 function useHash(): string {
   const [hash, setHash] = useState(() => window.location.hash);
@@ -28,7 +29,11 @@ export default function App() {
   else if (root === "projects") page = <ProjectsPage />;
   else if (root === "albums" && id) page = <AlbumPage albumId={id} />;
   else if (root === "albums") page = <AlbumsPage />;
-  else if (root === "map" && id) page = <MapPage projectId={id} />;
+  else if (root === "map" && id) page = (
+    <Suspense fallback={<div className="p-6 text-slate-400">Loading map…</div>}>
+      <MapPage projectId={id} />
+    </Suspense>
+  );
   else if (root === "templates") page = <TemplatesPage />;
   else if (root === "settings") page = <SettingsPage />;
   else page = <ProjectsPage />;

@@ -43,9 +43,13 @@ export async function initBackend(): Promise<void> {
   seedTemplates();
   await persistDb();
 
-  void UpdateInstaller.addListener("downloadProgress", (data) => {
-    emitUpdate({ type: "progress", percent: data.percent });
-  });
+  try {
+    void UpdateInstaller.addListener("downloadProgress", (data) => {
+      emitUpdate({ type: "progress", percent: data.percent });
+    });
+  } catch {
+    /* updater plugin unavailable — updates still checkable via GitHub */
+  }
 
   const api: AlbumForgeApi = {
     info: () =>
