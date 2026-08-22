@@ -62,27 +62,44 @@ jobs:
         run: |
           set -e
           APK=$(ls mobile/android/app/build/outputs/apk/debug/*.apk | head -n1)
+          APK_NAME=$(basename "$APK")
           TAG="${GITHUB_REF_NAME}"
           REPO="$GITHUB_REPOSITORY"
           BASE="https://api.github.com/repos/$REPO"
           AUTH="Authorization: Bearer $GH_TOKEN"
           UA="User-Agent: albumforge-ci"
-          REL=$(curl -s -H "$AUTH" -H "$UA" "$BASE/releases/tags/$TAG")
-          if echo "$REL" | grep -q '"message": "Not Found"'; then
+          LOG=""
+
+          REL=$(curl -s -H "$AUTH" -H "$UA" "$BASE/releases/tags/$TAG" || true)
+          if ! echo "$REL" | jq -e '.id' >/dev/null 2>&1; then
+            LOG="${LOG}get-release: $(echo "$REL" | head -c 300)\n"
             REL=$(curl -s -X POST -H "$AUTH" -H "$UA" -H "Content-Type: application/json" \
               -d "{\"tag_name\":\"$TAG\",\"name\":\"AlbumForge $TAG\",\"prerelease\":true}" "$BASE/releases")
           fi
-          REL_ID=$(echo "$REL" | jq -r '.id')
-          for AID in $(echo "$REL" | jq -r '.assets[]?.id'); do
-            curl -s -X DELETE -H "$AUTH" -H "$UA" "$BASE/releases/assets/$AID" -o /dev/null || true
-          done
-          UPLOAD_URL=$(echo "$REL" | jq -r '.upload_url' | sed 's/{?name,label}//')
-          RESP=$(curl -s -X POST -H "$AUTH" -H "$UA" -H "Content-Type: application/vnd.android.package-archive" \
-            --data-binary @"$APK" "$UPLOAD_URL?name=$(basename "$APK")")
-          echo "$RESP"
-          if ! echo "$RESP" | grep -q '"browser_download_url"'; then
-            curl -s -X PATCH -H "$AUTH" -H "$UA" -H "Content-Type: application/json" \
-              -d "{\"body\":\"publish failed: $RESP\"}" "$BASE/releases/$REL_ID" -o /dev/null
-            echo "APK upload failed"
+          REL_ID=$(echo "$REL" | jq -r '.id // empty')
+          if [ -z "$REL_ID" ]; then
+            echo "Could not find or create release for $TAG: $(echo "$REL" | head -c 500)"
             exit 1
           fi
+          LOG="${LOG}release-id: $REL_ID\n"
+
+          # Remove any previous asset with the same name so re-uploads succeed.
+          for AID in $(echo "$REL" | jq -r --arg n "$APK_NAME" '.assets[]? | select(.name == $n) | .id'); do
+            curl -s -X DELETE -H "$AUTH" -H "$UA" "$BASE/releases/assets/$AID" -o /dev/null || true
+          done
+
+          UPLOAD_URL=$(echo "$REL" | jq -r '.upload_url' | sed 's/{?name,label}//')
+          RESP=$(curl -s -X POST -H "$AUTH" -H "$UA" -H "Content-Type: application/vnd.android.package-archive" \
+            --data-binary @"$APK" "$UPLOAD_URL?name=$APK_NAME")
+          LOG="${LOG}upload: $(echo "$RESP" | head -c 400)\n"
+
+          if ! echo "$RESP" | grep -q '"browser_download_url"'; then
+            BODY="publish log:\n$LOG"
+            curl -s -X PATCH -H "$AUTH" -H "$UA" -H "Content-Type: application/json" \
+              -d "{\"body\":\"$BODY\"}" "$BASE/releases/$REL_ID" -o /dev/null || true
+            echo "APK upload failed: $(echo "$RESP" | head -c 400)"
+            exit 1
+          fi
+          curl -s -X PATCH -H "$AUTH" -H "$UA" -H "Content-Type: application/json" \
+            -d "{\"body\":\"published $APK_NAME\"}" "$BASE/releases/$REL_ID" -o /dev/null || true
+          echo "Published $APK_NAME to release $TAG"
