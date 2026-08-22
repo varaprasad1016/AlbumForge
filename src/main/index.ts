@@ -6,7 +6,7 @@ import { pathToFileURL } from "url";
 import { DB, initDatabase } from "./db";
 import { fontPath } from "./fonts";
 import { registerIpc } from "./ipc";
-import { seedTemplates } from "./seed";
+import { seedDesigns, seedTemplates } from "./seed";
 
 function buildMenu(): void {
   const template: Electron.MenuItemConstructorOptions[] = [
@@ -83,6 +83,7 @@ app.whenReady().then(() => {
 
   db = initDatabase(join(dataDir, "albumforge.db"));
   seedTemplates(db);
+  seedDesigns(db);
 
   // Serve local photo assets (thumbnails/previews/originals) to the renderer without
   // exposing raw filesystem paths. The renderer requests `media://<kind>/<photoId>`.

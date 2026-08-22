@@ -1,6 +1,6 @@
 /** Template seed data — five families referencing the layout catalogue. */
 import { LAYOUT_CATALOG } from "./engine/layouts";
-import { DB, newId } from "./db";
+import { DB, newId, now } from "./db";
 
 export interface TemplateFamilySeed {
   name: string;
@@ -253,6 +253,65 @@ export const TEMPLATE_FAMILIES: TemplateFamilySeed[] = [
     ],
   },
 ];
+
+const STARTER_DESIGNS: Array<{ name: string; data: unknown }> = [
+  {
+    name: "Ornate wedding frame",
+    data: {
+      layoutKey: null,
+      background: { color: "#ffffff", pattern: null },
+      elements: [
+        { type: "image", z: 0, x: 0.11, y: 0.11, width: 0.78, height: 0.78, rotation: 0, photoId: null, crop: null, text: null, style: null },
+        { type: "shape", z: 1, x: 0.055, y: 0.055, width: 0.89, height: 0.89, rotation: 0, photoId: null, crop: null, text: null, style: { shape: "rect", fill: "none", stroke: "#8a7a5c", strokeWidth: 3, opacity: 1 } },
+        { type: "shape", z: 2, x: 0.068, y: 0.068, width: 0.864, height: 0.864, rotation: 0, photoId: null, crop: null, text: null, style: { shape: "rect", fill: "none", stroke: "#8a7a5c", strokeWidth: 1, opacity: 1 } },
+        { type: "graphic", z: 3, x: 0.02, y: 0.02, width: 0.15, height: 0.15, rotation: 0, photoId: null, crop: null, text: null, style: { graphicId: "corner_filigree", color: "#8a7a5c", opacity: 1 } },
+        { type: "graphic", z: 3, x: 0.83, y: 0.02, width: 0.15, height: 0.15, rotation: 90, photoId: null, crop: null, text: null, style: { graphicId: "corner_filigree", color: "#8a7a5c", opacity: 1 } },
+        { type: "graphic", z: 3, x: 0.83, y: 0.83, width: 0.15, height: 0.15, rotation: 180, photoId: null, crop: null, text: null, style: { graphicId: "corner_filigree", color: "#8a7a5c", opacity: 1 } },
+        { type: "graphic", z: 3, x: 0.02, y: 0.83, width: 0.15, height: 0.15, rotation: 270, photoId: null, crop: null, text: null, style: { graphicId: "corner_filigree", color: "#8a7a5c", opacity: 1 } },
+      ],
+    },
+  },
+  {
+    name: "Botanical border",
+    data: {
+      layoutKey: null,
+      background: { color: "#fbf7ef", pattern: null },
+      elements: [
+        { type: "image", z: 0, x: 0.08, y: 0.3, width: 0.4, height: 0.62, rotation: 0, photoId: null, crop: null, text: null, style: null },
+        { type: "image", z: 0, x: 0.52, y: 0.3, width: 0.4, height: 0.62, rotation: 0, photoId: null, crop: null, text: null, style: null },
+        { type: "graphic", z: 2, x: 0.36, y: 0.015, width: 0.28, height: 0.28, rotation: 0, photoId: null, crop: null, text: null, style: { graphicId: "wreath_floral", color: "#7d8a5f", opacity: 1 } },
+        { type: "graphic", z: 2, x: 0.012, y: 0.012, width: 0.15, height: 0.15, rotation: 0, photoId: null, crop: null, text: null, style: { graphicId: "corner_floral", color: "#7d8a5f", opacity: 1 } },
+        { type: "graphic", z: 2, x: 0.838, y: 0.012, width: 0.15, height: 0.15, rotation: 90, photoId: null, crop: null, text: null, style: { graphicId: "corner_floral", color: "#7d8a5f", opacity: 1 } },
+        { type: "graphic", z: 2, x: 0.838, y: 0.838, width: 0.15, height: 0.15, rotation: 180, photoId: null, crop: null, text: null, style: { graphicId: "corner_floral", color: "#7d8a5f", opacity: 1 } },
+        { type: "graphic", z: 2, x: 0.012, y: 0.838, width: 0.15, height: 0.15, rotation: 270, photoId: null, crop: null, text: null, style: { graphicId: "corner_floral", color: "#7d8a5f", opacity: 1 } },
+      ],
+    },
+  },
+  {
+    name: "Indian mandala collage",
+    data: {
+      layoutKey: null,
+      background: { color: "#fdf6ec", pattern: null },
+      elements: [
+        { type: "image", z: 1, x: 0.05, y: 0.05, width: 0.4, height: 0.4, rotation: 0, photoId: null, crop: null, text: null, style: null },
+        { type: "image", z: 1, x: 0.55, y: 0.05, width: 0.4, height: 0.4, rotation: 0, photoId: null, crop: null, text: null, style: null },
+        { type: "image", z: 1, x: 0.05, y: 0.55, width: 0.4, height: 0.4, rotation: 0, photoId: null, crop: null, text: null, style: null },
+        { type: "image", z: 1, x: 0.55, y: 0.55, width: 0.4, height: 0.4, rotation: 0, photoId: null, crop: null, text: null, style: null },
+        { type: "graphic", z: 0, x: 0.27, y: 0.27, width: 0.46, height: 0.46, rotation: 0, photoId: null, crop: null, text: null, style: { graphicId: "mandala", color: "#b08d57", opacity: 0.85 } },
+        { type: "graphic", z: 2, x: 0.44, y: 0.44, width: 0.12, height: 0.12, rotation: 0, photoId: null, crop: null, text: null, style: { graphicId: "medallion", color: "#8a7a5c", opacity: 1 } },
+      ],
+    },
+  },
+];
+
+export function seedDesigns(db: DB): void {
+  const count = (db.prepare("SELECT COUNT(*) AS c FROM designs").get() as { c: number }).c;
+  if (count > 0) return;
+  const insert = db.prepare("INSERT INTO designs (id, name, layout_json, created_at) VALUES (?, ?, ?, ?)");
+  for (const d of STARTER_DESIGNS) {
+    insert.run(newId(), d.name, JSON.stringify(d.data), now());
+  }
+}
 
 export function seedTemplates(db: DB): void {
   const insertTemplate = db.prepare(

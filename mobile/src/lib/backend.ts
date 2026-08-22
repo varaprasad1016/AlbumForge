@@ -1,7 +1,7 @@
 /** Mobile backend entry: builds `window.albumforge` from the module pieces. */
 import type { AlbumForgeApi, UpdateEvent } from "./api";
 import { initDb, persistDb } from "./db";
-import { seedTemplates } from "./seed";
+import { seedDesigns, seedTemplates } from "./seed";
 import { assetUrl, fontUrl, onProgress } from "./backend-helpers";
 import { buildCrudApi } from "./backend-crud";
 import { buildAlbumsApi } from "./backend-albums";
@@ -41,6 +41,7 @@ let downloadedPath: string | null = null;
 export async function initBackend(): Promise<void> {
   await initDb();
   seedTemplates();
+  seedDesigns();
   await persistDb();
 
   try {
