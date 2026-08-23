@@ -315,12 +315,19 @@ export class StockService {
     this.cacheDir = join(opts.cacheDir, "stock");
     this.configPath = join(opts.dataDir, "stock-config.json");
     this.recentPath = join(opts.cacheDir, "stock-recent.json");
-    mkdirSync(this.cacheDir, { recursive: true });
+    this.ensureCacheDir();
     try {
       this.recentTerms = JSON.parse(readFileSync(this.recentPath, "utf8")) as string[];
     } catch {
       this.recentTerms = [];
     }
+  }
+
+  /** Guarantee the stock cache directory exists before any file operation.
+   *  Called lazily at every touch-point so the folder is created automatically
+   *  on first use — even on a fresh install or after the cache was cleared. */
+  private ensureCacheDir(): void {
+    mkdirSync(this.cacheDir, { recursive: true });
   }
 
   private readConfig(): StockConfig {
@@ -387,6 +394,7 @@ export class StockService {
     if (!t) return;
     this.recentTerms = [t, ...this.recentTerms.filter((x) => x !== t)].slice(0, RECENT_CAP);
     try {
+      mkdirSync(join(this.recentPath, ".."), { recursive: true });
       writeFileSync(this.recentPath, JSON.stringify(this.recentTerms));
     } catch {
       /* non-fatal */
@@ -481,6 +489,7 @@ export class StockService {
     let vector: StockVectorData | null = null;
     if (kind === "vector") {
       try {
+        this.ensureCacheDir();
         vector = parseSvg(readFileSync(row.local_path, "utf8"));
       } catch {
         vector = null;
@@ -539,6 +548,7 @@ export class StockService {
     else if (ctype.includes("jpeg") || ctype.includes("jpg")) ext = "jpg";
     else if (ctype.includes("webp")) ext = "webp";
 
+    this.ensureCacheDir();
     const localPath = join(this.cacheDir, `${providerId}.${ext}`);
     writeFileSync(localPath, buf);
 

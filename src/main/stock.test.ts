@@ -1,5 +1,36 @@
-import { describe, expect, it } from "vitest";
-import { mapFreepikResource, mapPixabayHit, mapUnsplashPhoto, parseSvg } from "./stock";
+import { afterEach, describe, expect, it } from "vitest";
+import { existsSync, mkdtempSync, mkdirSync, rmSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
+import { StockService, mapFreepikResource, mapPixabayHit, mapUnsplashPhoto, parseSvg } from "./stock";
+import type { DB } from "./db";
+import type { StockDownloadInput } from "@shared/api";
+
+/** Minimal in-memory fake of the better-sqlite3 surface the service uses. */
+function fakeDb(): { db: DB; store: Map<string, unknown> } {
+  const store = new Map<string, unknown>();
+  const db = {
+    prepare(sql: string) {
+      return {
+        get: (...args: unknown[]) => {
+          if (sql.includes("stock_search_cache") && sql.includes("WHERE")) return store.get(`cache:${args[0]}`) ?? undefined;
+          if (sql.includes("stock_assets") && sql.includes("WHERE")) return store.get(`asset:${args[0]}`) ?? undefined;
+          return undefined;
+        },
+        run: (...args: unknown[]) => {
+          if (sql.includes("stock_search_cache")) store.set(`cache:${args[0]}`, { payload: args[1], created_at: args[2] });
+          if (sql.includes("stock_assets")) store.set(`asset:${args[0]}`, args[0]);
+        },
+      };
+    },
+  };
+  return { db: db as unknown as DB, store };
+}
+
+const realFetch = globalThis.fetch;
+afterEach(() => {
+  globalThis.fetch = realFetch;
+});
 
 describe("parseSvg — recolourable vector extraction", () => {
   it("extracts paths bucketed by fill colour", () => {
@@ -190,5 +221,34 @@ describe("mapUnsplashPhoto", () => {
   it("tolerates junk input", () => {
     expect(mapUnsplashPhoto(null)).toBeNull();
     expect(mapUnsplashPhoto({ no_id: true })).toBeNull();
+  });
+});
+
+describe("StockService cache directory", () => {
+  it("creates the stock cache folder automatically when it is missing at download time", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "af-stock-ensure-"));
+    const cacheRoot = join(dir, "cache");
+    const { db } = fakeDb();
+    const svc = new StockService({ db, cacheDir: cacheRoot, dataDir: dir });
+
+    // Fresh install / cache cleared: wipe the stock folder the constructor made.
+    rmSync(join(cacheRoot, "stock"), { recursive: true, force: true });
+    expect(existsSync(join(cacheRoot, "stock"))).toBe(false);
+
+    globalThis.fetch = async () =>
+      new Response(new Uint8Array([1, 2, 3, 4]), { headers: { "content-type": "image/png" } });
+
+    const input: StockDownloadInput = {
+      sourceUrl: "https://cdn.example.com/asset.png",
+      title: "test",
+    };
+    const res = await svc.download("pixabay-999", input);
+    expect(res.kind).toBe("bitmap");
+    // The download must have written the file — no ENOENT.
+    expect(existsSync(join(cacheRoot, "stock", "pixabay-999.png"))).toBe(true);
+
+    // Repeat download serves from the DB cache row.
+    const again = await svc.download("pixabay-999", input);
+    expect(again.fromCache).toBe(true);
   });
 });
