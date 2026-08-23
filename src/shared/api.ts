@@ -478,4 +478,15 @@ export interface AlbumForgeApi {
     parseSvg(svg: string): Promise<StockVectorData>;
     recent(limit?: number): Promise<string[]>;
   };
+  gen: {
+    configured(): Promise<boolean>;
+    provider(): Promise<string>;
+    setProvider(provider: string): Promise<boolean>;
+    setApiKey(provider: string, key: string): Promise<boolean>;
+    generate(
+      prompt: string,
+      opts?: { width?: number; height?: number },
+    ): Promise<{ ok: boolean; asset?: { id: string; name: string; kind: "png"; dataUri: string }; error?: string }>;
+  };
 }
+

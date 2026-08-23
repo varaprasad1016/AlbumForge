@@ -15,6 +15,7 @@ import { listFonts, readFont } from "./fonts";
 import { hasMatte, mattePath, segmentPhoto } from "./segment";
 import { suggestForPhotos } from "./recommend";
 import { parseSvg, StockService } from "./stock";
+import { GenService } from "./gen";
 import type {
   Album,
   AlbumElement,
@@ -337,6 +338,16 @@ export function registerIpc(ctx: IpcContext): void {
     stockService.download(providerId, input),
   );
   ipcMain.handle("stock:parseSvg", (_e, svg: string) => parseSvg(svg));
+
+  // ---- AI element generation (text → graphic, saved to the assets library) --
+  const genService = new GenService({ db, cacheDir, dataDir });
+  ipcMain.handle("gen:configured", () => genService.configured());
+  ipcMain.handle("gen:provider", () => genService.provider());
+  ipcMain.handle("gen:setProvider", (_e, p: string) => genService.setProvider(p));
+  ipcMain.handle("gen:setApiKey", (_e, provider: string, key: string) => genService.setApiKey(provider, key));
+  ipcMain.handle("gen:generate", (_e, prompt: string, opts?: { width?: number; height?: number }) =>
+    genService.generate(prompt, opts),
+  );
 
   // ---- Subject segmentation (on-device background removal) -----------------
   ipcMain.handle("photos:segment", async (_e, photoId: string) => {

@@ -107,6 +107,13 @@ const api: AlbumForgeApi = {
     parseSvg: (svg) => ipcRenderer.invoke("stock:parseSvg", svg),
     recent: (limit) => ipcRenderer.invoke("stock:recent", limit),
   },
+  gen: {
+    configured: () => ipcRenderer.invoke("gen:configured"),
+    provider: () => ipcRenderer.invoke("gen:provider"),
+    setProvider: (provider) => ipcRenderer.invoke("gen:setProvider", provider),
+    setApiKey: (provider, key) => ipcRenderer.invoke("gen:setApiKey", provider, key),
+    generate: (prompt, opts) => ipcRenderer.invoke("gen:generate", prompt, opts),
+  },
 };
 
 contextBridge.exposeInMainWorld("albumforge", api);

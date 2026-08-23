@@ -220,6 +220,10 @@ export default function AlbumEditor({
   const [eventType, setEventType] = useState("wedding");
   const [suggesting, setSuggesting] = useState(false);
   const [segmenting, setSegmenting] = useState<string | null>(null);
+  const [genPrompt, setGenPrompt] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [genProvider, setGenProvider] = useState<"pollinations" | "bfl">("pollinations");
+  const [genKey, setGenKey] = useState("");
   const [recentColors, setRecentColors] = useState<string[]>(() => {
     try {
       return JSON.parse(localStorage.getItem("af-recent-colors") ?? "[]") as string[];
@@ -239,6 +243,9 @@ export default function AlbumEditor({
   useEffect(() => {
     window.albumforge.assets.list().then(setAssets);
     window.albumforge.designs.list().then(setDesigns);
+    window.albumforge.gen.provider().then((p) => {
+      if (p === "pollinations" || p === "bfl") setGenProvider(p);
+    });
   }, []);
 
   const trRef = useRef<Konva.Transformer>(null);
@@ -1091,6 +1098,32 @@ export default function AlbumEditor({
     }
   }
 
+  /** AI element generation: describe a graphic → generate → add to page + library. */
+  async function generateElement() {
+    const prompt = genPrompt.trim();
+    if (!prompt) {
+      toast("Describe the element you want first.");
+      return;
+    }
+    setGenerating(true);
+    try {
+      const res = await window.albumforge.gen.generate(prompt);
+      if (!res.ok || !res.asset) {
+        toast(res.error ?? "Generation failed");
+        return;
+      }
+      // Refresh the library so the new graphic shows in "your graphics".
+      setAssets(await window.albumforge.assets.list());
+      addGraphic(`asset:${res.asset.id}`);
+      toast(`Generated “${res.asset.name}” — saved to your graphics library`);
+      setGenPrompt("");
+    } catch (e) {
+      toast(`Generation failed: ${String(e)}`);
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   async function addPage() {
     const newPage = await window.albumforge.albums.addPage(albumId);
     const next = [...pagesState, newPage];
@@ -1741,6 +1774,69 @@ export default function AlbumEditor({
               <p className="text-[11px] text-slate-400">
                 Reads the page's photos, extracts the palette, and applies a background, ornament
                 and title font.
+              </p>
+            </div>
+
+            <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">
+              <label className="field-label">✨ Generate element</label>
+              <textarea
+                value={genPrompt}
+                onChange={(e) => setGenPrompt(e.target.value)}
+                onKeyDown={(e) => {
+                  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") void generateElement();
+                }}
+                placeholder="Describe an element… e.g. gold mehndi mandala ornament on transparent background"
+                rows={2}
+                className="input w-full resize-none !py-1.5 text-xs"
+              />
+              <div className="flex items-center gap-1">
+                {(["pollinations", "bfl"] as const).map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => void setGenProvider(p)}
+                    className={`flex-1 rounded-lg border px-1.5 py-1 text-[10px] font-medium ${
+                      genProvider === p
+                        ? "border-indigo-400 bg-indigo-50 text-indigo-700"
+                        : "border-slate-200 hover:border-slate-300"
+                    }`}
+                    title={p === "pollinations" ? "Free, no key needed" : "Black Forest Labs FLUX — paid"}
+                  >
+                    {p === "pollinations" ? "Pollinations · free" : "FLUX · pro"}
+                  </button>
+                ))}
+              </div>
+              {genProvider === "bfl" && (
+                <div className="flex gap-1">
+                  <input
+                    value={genKey}
+                    onChange={(e) => setGenKey(e.target.value)}
+                    placeholder="BFL API key"
+                    type="password"
+                    className="input flex-1 !px-2 !py-1 text-xs"
+                  />
+                  <button
+                    onClick={async () => {
+                      if (!genKey.trim()) return;
+                      await window.albumforge.gen.setApiKey("bfl", genKey.trim());
+                      setGenKey("");
+                      toast("FLUX key saved");
+                    }}
+                    className="btn-secondary !px-2 !py-1 text-xs"
+                  >
+                    Save
+                  </button>
+                </div>
+              )}
+              <button
+                onClick={() => void generateElement()}
+                disabled={generating}
+                className="btn-primary w-full !px-2 !py-1.5 text-xs"
+              >
+                {generating ? "Generating…" : "⚡ Generate element"}
+              </button>
+              <p className="text-[11px] text-slate-400">
+                Describes a graphic, generates it with AI, adds it to the page and saves it to your
+                graphics library for reuse. Ctrl+Enter to run.
               </p>
             </div>
           </section>

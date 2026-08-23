@@ -170,6 +170,20 @@ Remaining in Module 2:
   attribution and premium items are filtered. Vecteezy/Unsplash are swappable
   behind the same interface. See §5 for the app-embedding licensing discussion.
 
+### Module 7b — AI element generation (text → graphic) — *done this pass*
+
+- **Text intake → element:** the editor's AI panel has a description box
+  (Ctrl+Enter to run). `GenService` (`src/main/gen.ts`) calls an image provider
+  from the main process only, then saves the result into the `assets` table — so
+  every generated graphic lands in the "your graphics" library and is dropped on
+  the page like an imported asset.
+- **Providers:** `pollinations` (default — free, no key, verified live) and
+  `bfl` (Black Forest Labs FLUX — paid; key via `gen:setApiKey` into
+  `userData/gen-config.json`, async job + `/v1/get_result` polling). Output is
+  normalized to PNG (sharp) for uniform rendering and export.
+- **Accuracy note:** free-tier generation is a decent first pass for ornaments /
+  backgrounds; for print-grade results switch the chip to FLUX (`BFL_API_KEY`).
+
 ---
 
 ## 3. Architecture — current vs. target
