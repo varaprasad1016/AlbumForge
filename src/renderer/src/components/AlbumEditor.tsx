@@ -17,7 +17,7 @@ import Konva from "konva";
 import type { AlbumElement, AlbumPage, CropRect, DesignAsset, PageDesign, PageSize, StockVectorData } from "@shared/api";
 import { PAGE_PATTERNS, patternDataUri } from "@shared/patterns";
 import { findGraphic, graphicCategory, graphicPreviewUri, GRAPHICS, type ShapeKind } from "@shared/designs";
-import { coverCrop, panCropRect, reorderLayer, zoomCropRect, type LayerOp } from "../lib/layoutMath";
+import { coverCrop, panCropRect, reorderLayer, stageToPage, zoomCropRect, type LayerOp } from "../lib/layoutMath";
 import PhotoPicker from "./PhotoPicker";
 import StockPanel, { type StockDragPayload } from "./StockPanel";
 import PromptModal from "./PromptModal";
@@ -25,6 +25,11 @@ import { toast } from "./Toast";
 import { useFonts } from "./useFonts";
 
 const PAGE_W = 600;
+
+/** Page offset inside the stage (left/top margin). Drag handlers convert stage
+ *  coordinates back to normalized page coordinates by subtracting this. */
+const PAGE_X = 40;
+const PAGE_Y = 40;
 
 /** Map canonical filter values (brightness/saturation/hue/contrast/blur, with
  *  neutral defaults) onto Konva filters + node props. Canonical ranges keep the
@@ -430,34 +435,40 @@ export default function AlbumEditor({
     setSelectedIds(new Set());
   }
 
-  function snapDrag(node: Konva.Group, el: AlbumElement) {
+  /** Free-form drag with optional Shift-to-snap. Stage coordinates (which
+   *  include the page offset) are converted to normalized page space and the
+   *  element is live-synced on every move, so re-renders apply the current
+   *  position instead of resetting the dragged node to a stale value. */
+  function dragElement(node: Konva.Group, el: AlbumElement, shiftKey: boolean) {
     const w = el.width;
     const h = el.height;
-    const x = node.x() / canvasW;
-    const y = node.y() / PAGE_H;
-    const SNAP = 6 / canvasW;
+    const { x, y } = stageToPage(node.x(), node.y(), PAGE_X, PAGE_Y, canvasW, PAGE_H);
     let gx: number | undefined;
     let gy: number | undefined;
-    const others = elements.filter((e) => e.id !== el.id && !selectedIds.has(e.id));
-    const targetsX = [0, 0.5, 1, ...others.flatMap((e) => [e.x, e.x + e.width, e.x + e.width / 2])];
-    const targetsY = [0, 0.5, 1, ...others.flatMap((e) => [e.y, e.y + e.height, e.y + e.height / 2])];
-    for (const t of targetsX) {
-      for (const [off, val] of [[0, x], [w, x + w], [w / 2, x + w / 2]] as const) {
-        if (Math.abs(val - t) < SNAP) {
-          gx = t - off;
-          node.x(gx * canvasW);
+    if (shiftKey) {
+      const SNAP = 6 / canvasW;
+      const others = elements.filter((e) => e.id !== el.id && !selectedIds.has(e.id));
+      const targetsX = [0, 0.5, 1, ...others.flatMap((e) => [e.x, e.x + e.width, e.x + e.width / 2])];
+      const targetsY = [0, 0.5, 1, ...others.flatMap((e) => [e.y, e.y + e.height, e.y + e.height / 2])];
+      for (const t of targetsX) {
+        for (const [off, val] of [[0, x], [w, x + w], [w / 2, x + w / 2]] as const) {
+          if (Math.abs(val - t) < SNAP) {
+            gx = t - off;
+            node.x(gx * canvasW + PAGE_X);
+          }
+        }
+      }
+      for (const t of targetsY) {
+        for (const [off, val] of [[0, y], [h, y + h], [h / 2, y + h / 2]] as const) {
+          if (Math.abs(val - t) < SNAP) {
+            gy = t - off;
+            node.y(gy * PAGE_H + PAGE_Y);
+          }
         }
       }
     }
-    for (const t of targetsY) {
-      for (const [off, val] of [[0, y], [h, y + h], [h / 2, y + h / 2]] as const) {
-        if (Math.abs(val - t) < SNAP) {
-          gy = t - off;
-          node.y(gy * PAGE_H);
-        }
-      }
-    }
-    setGuides({ x: gx, y: gy });
+    updateElementLive(el.id, stageToPage(node.x(), node.y(), PAGE_X, PAGE_Y, canvasW, PAGE_H));
+    setGuides((g) => (g.x === gx && g.y === gy ? g : { x: gx, y: gy }));
   }
 
   function alignSel(mode: "left" | "centerH" | "right" | "top" | "middleV" | "bottom") {
@@ -1067,8 +1078,7 @@ export default function AlbumEditor({
     (el: { id: string }) => (e: Konva.KonvaEventObject<Event>) => {
       const node = e.target as Konva.Group;
       updateElement(el.id, {
-        x: node.x() / canvasW,
-        y: node.y() / PAGE_H,
+        ...stageToPage(node.x(), node.y(), PAGE_X, PAGE_Y, canvasW, PAGE_H),
         width: (node.width() * node.scaleX()) / canvasW,
         height: (node.height() * node.scaleY()) / PAGE_H,
         rotation: node.rotation(),
@@ -1083,7 +1093,7 @@ export default function AlbumEditor({
   const onDragEnd = useCallback(
     (el: { id: string }) => (e: Konva.KonvaEventObject<DragEvent>) => {
       const node = e.target as Konva.Group;
-      updateElement(el.id, { x: node.x() / canvasW, y: node.y() / PAGE_H });
+      updateElement(el.id, stageToPage(node.x(), node.y(), PAGE_X, PAGE_Y, canvasW, PAGE_H));
       setGuides({});
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1446,8 +1456,8 @@ export default function AlbumEditor({
                 <ElementNode
                   key={el.id}
                   el={el}
-                  pageX={40}
-                  pageY={40}
+                  pageX={PAGE_X}
+                  pageY={PAGE_Y}
                   pageW={canvasW}
                   pageH={PAGE_H}
                   selected={selectedIds.has(el.id)}
@@ -1456,7 +1466,7 @@ export default function AlbumEditor({
                     nodeRefs.current[el.id] = n;
                   }}
                   onSelect={(evt) => selectOne(el.id, evt.evt.shiftKey)}
-                  onDragMove={(node) => snapDrag(node, el)}
+                  onDragMove={(node, evt) => dragElement(node, el, evt.evt.shiftKey)}
                   onDragEnd={onDragEnd(el)}
                   onTransformEnd={onTransformEnd(el)}
                   onImgLoad={(w, h) => {
@@ -2226,7 +2236,7 @@ function ElementNode({
   cropMode?: boolean;
   nodeRef: (n: Konva.Group | null) => void;
   onSelect: (e: Konva.KonvaEventObject<MouseEvent>) => void;
-  onDragMove?: (node: Konva.Group) => void;
+  onDragMove?: (node: Konva.Group, evt: Konva.KonvaEventObject<DragEvent>) => void;
   onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => void;
   onTransformEnd: (e: Konva.KonvaEventObject<Event>) => void;
   onEditTextRequest: (el: AlbumElement) => void;
@@ -2298,7 +2308,7 @@ function ElementNode({
         draggable
         onClick={onSelect}
         onTap={onSelect}
-        onDragMove={(e) => onDragMove?.(e.target as Konva.Group)} onDragEnd={onDragEnd}
+        onDragMove={(e) => onDragMove?.(e.target as Konva.Group, e)} onDragEnd={onDragEnd}
         onTransformEnd={onTransformEnd}
       >
         {shapeNode}
@@ -2327,7 +2337,7 @@ function ElementNode({
         draggable
         onClick={onSelect}
         onTap={onSelect}
-        onDragMove={(e) => onDragMove?.(e.target as Konva.Group)} onDragEnd={onDragEnd}
+        onDragMove={(e) => onDragMove?.(e.target as Konva.Group, e)} onDragEnd={onDragEnd}
         onTransformEnd={onTransformEnd}
       >
         {g && (
@@ -2360,7 +2370,7 @@ function ElementNode({
         draggable
         onClick={onSelect}
         onTap={onSelect}
-        onDragMove={(e) => onDragMove?.(e.target as Konva.Group)}
+        onDragMove={(e) => onDragMove?.(e.target as Konva.Group, e)}
         onDragEnd={onDragEnd}
         onTransformEnd={onTransformEnd}
       >
@@ -2393,7 +2403,7 @@ function ElementNode({
         draggable
         onClick={onSelect}
         onTap={onSelect}
-        onDragMove={(e) => onDragMove?.(e.target as Konva.Group)}
+        onDragMove={(e) => onDragMove?.(e.target as Konva.Group, e)}
         onDragEnd={onDragEnd}
         onTransformEnd={onTransformEnd}
       >
@@ -2416,7 +2426,7 @@ function ElementNode({
         onClick={onSelect}
         onTap={onSelect}
         onDblClick={() => onEditTextRequest(el)}
-        onDragMove={(e) => onDragMove?.(e.target as Konva.Group)} onDragEnd={onDragEnd}
+        onDragMove={(e) => onDragMove?.(e.target as Konva.Group, e)} onDragEnd={onDragEnd}
         onTransformEnd={onTransformEnd}
       >
         {el.type === "background" ? (
@@ -2494,9 +2504,8 @@ function ElementNode({
               onCropDragStart?.();
             }
           : undefined
-      }
-      onDragMove={
-        cropMode ? (e) => panCropMove(e.target as Konva.Group) : (e) => onDragMove?.(e.target as Konva.Group)
+      }        onDragMove={
+        cropMode ? (e) => panCropMove(e.target as Konva.Group) : (e) => onDragMove?.(e.target as Konva.Group, e)
       }
       onDragEnd={cropMode ? () => onCropDragEnd?.() : onDragEnd}
       onTransformEnd={cropMode ? undefined : onTransformEnd}

@@ -12,6 +12,20 @@ export interface CropRect {
 }
 
 /** object-fit: cover crop for a source image into a target box (normalized to the source). */
+/** Convert a node position in stage space (which includes the page's top-left
+ *  offset) into normalized page coordinates. Drag/transform handlers must use
+ *  this — forgetting the offset makes every drag shift the element and compound. */
+export function stageToPage(
+  stageX: number,
+  stageY: number,
+  pageX: number,
+  pageY: number,
+  canvasW: number,
+  pageH: number,
+): { x: number; y: number } {
+  return { x: (stageX - pageX) / canvasW, y: (stageY - pageY) / pageH };
+}
+
 export function coverCrop(srcW: number, srcH: number, nodeW: number, nodeH: number): CropRect {
   const srcAspect = srcW / srcH;
   const nodeAspect = nodeW / nodeH;

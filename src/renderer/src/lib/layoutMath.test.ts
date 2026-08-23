@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clampCrop, coverCrop, panCropRect, reorderLayer, zoomCropRect } from "./layoutMath";
+import { clampCrop, coverCrop, panCropRect, reorderLayer, stageToPage, zoomCropRect } from "./layoutMath";
 
 describe("coverCrop — object-fit cover", () => {
   it("fills a landscape node from a landscape source", () => {
@@ -20,6 +20,21 @@ describe("coverCrop — object-fit cover", () => {
     expect(c.height).toBeCloseTo(1 / 3);
     expect(c.x).toBe(0);
     expect(c.y).toBeCloseTo(1 / 3);
+  });
+});
+
+describe("stageToPage — drag coordinate conversion", () => {
+  it("subtracts the page offset and normalizes", () => {
+    // Element at normalized (0.5, 0.25) on a 600×400 page sits at stage (340, 140).
+    expect(stageToPage(340, 140, 40, 40, 600, 400)).toEqual({ x: 0.5, y: 0.25 });
+  });
+
+  it("keeps an element where it was dropped (no offset drift)", () => {
+    // Drag an element from (0.1, 0.1) to (0.35, 0.62) in normalized space.
+    const start = stageToPage(40 + 0.1 * 600, 40 + 0.1 * 400, 40, 40, 600, 400);
+    const end = stageToPage(40 + 0.35 * 600, 40 + 0.62 * 400, 40, 40, 600, 400);
+    expect(start).toEqual({ x: 0.1, y: 0.1 });
+    expect(end).toEqual({ x: 0.35, y: 0.62 }); // exactly where the cursor dropped it
   });
 });
 
