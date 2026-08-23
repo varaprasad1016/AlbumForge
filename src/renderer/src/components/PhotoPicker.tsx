@@ -3,10 +3,12 @@ import type { Photo } from "@shared/api";
 
 export default function PhotoPicker({
   projectId,
+  mode,
   onSelect,
   onClose,
 }: {
   projectId: string;
+  mode: "add" | "replace";
   onSelect: (photoId: string) => void;
   onClose: () => void;
 }) {
@@ -28,25 +30,41 @@ export default function PhotoPicker({
   }, []);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
-      <div
-        className="max-h-[80vh] w-[760px] overflow-auto rounded-lg bg-white p-4 shadow-lg"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="font-semibold">Choose a photo</h2>
+    <div className="fixed inset-y-0 right-0 z-40 flex w-80 flex-col border-l border-slate-200 bg-white shadow-2xl">
+      <header className="border-b border-slate-100 px-4 py-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold">{mode === "add" ? "Add photos" : "Replace photo"}</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-700">
             ✕
           </button>
         </div>
-        <div className="grid grid-cols-6 gap-2">
+        <p className="mt-1 text-[11px] text-slate-400">
+          Drag onto a frame or the page · click to {mode === "add" ? "place" : "replace"}
+        </p>
+      </header>
+      <div className="flex-1 overflow-auto p-3">
+        <div className="grid grid-cols-3 gap-2">
           {photos.map((p) => (
             <button
               key={p.id}
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData(
+                  "application/x-albumforge-photo",
+                  JSON.stringify({ id: p.id, w: p.width, h: p.height }),
+                );
+                e.dataTransfer.effectAllowed = "copy";
+              }}
               onClick={() => onSelect(p.id)}
               className="aspect-square overflow-hidden rounded border border-transparent hover:border-brand"
+              title={p.filename}
             >
-              <img src={`media://thumb256/${p.id}`} alt={p.filename} className="h-full w-full object-cover" draggable={false} />
+              <img
+                src={`media://thumb256/${p.id}`}
+                alt={p.filename}
+                className="h-full w-full object-cover"
+                draggable={false}
+              />
             </button>
           ))}
         </div>

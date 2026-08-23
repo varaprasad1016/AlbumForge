@@ -152,7 +152,8 @@ export function generateAndPersist(db: DB, input: GenerateInput): string[] {
     pageAspect: aspect,
     style: family.style,
     coverTitle: project?.name ?? null,
-  };
+    beatGapSeconds: 1800,
+  } as const;
 
   const albumIds: string[] = [];
   for (let v = 1; v <= input.variations; v++) {

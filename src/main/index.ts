@@ -99,6 +99,12 @@ app.whenReady().then(() => {
     if (kind === "thumb256") p = row?.thumbnail_path ?? null;
     else if (kind === "preview1024") p = row?.preview_path ?? null;
     else if (kind === "original") p = row?.file_path ?? null;
+    else if (kind === "matte") {
+      const m = db
+        .prepare("SELECT matte_path FROM subject_mattes WHERE photo_id = ?")
+        .get(id) as { matte_path: string } | undefined;
+      p = m?.matte_path ?? null;
+    }
     if (!p) return new Response("not found", { status: 404 });
     return net.fetch(pathToFileURL(p).toString());
   });

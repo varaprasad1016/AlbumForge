@@ -13,16 +13,127 @@ import {
   Text as KText,
   Transformer,
 } from "react-konva";
-import type Konva from "konva";
-import type { AlbumElement, AlbumPage, DesignAsset, PageDesign, PageSize } from "@shared/api";
+import Konva from "konva";
+import type { AlbumElement, AlbumPage, CropRect, DesignAsset, PageDesign, PageSize } from "@shared/api";
 import { PAGE_PATTERNS, patternDataUri } from "@shared/patterns";
-import { findGraphic, GRAPHICS, type ShapeKind } from "@shared/designs";
+import { findGraphic, graphicCategory, graphicPreviewUri, GRAPHICS, type ShapeKind } from "@shared/designs";
+import { coverCrop, panCropRect, reorderLayer, zoomCropRect, type LayerOp } from "../lib/layoutMath";
 import PhotoPicker from "./PhotoPicker";
 import PromptModal from "./PromptModal";
 import { toast } from "./Toast";
 import { useFonts } from "./useFonts";
 
 const PAGE_W = 600;
+
+/** Map canonical filter values (brightness/saturation/hue/contrast/blur, with
+ *  neutral defaults) onto Konva filters + node props. Canonical ranges keep the
+ *  editor preview and the sharp export pipeline on the same numbers. */
+type ImageFilter = (imageData: ImageData) => void;
+
+/** Composite a photo (cropped) with its subject matte (destination-in) into a
+ *  canvas — the masked result becomes the KImage source. Exact, no Konva filter. */
+function compositeMaskedCanvas(
+  photo: HTMLImageElement,
+  matte: HTMLImageElement,
+  cropPx: { x: number; y: number; width: number; height: number } | null,
+  w: number,
+  h: number,
+): HTMLCanvasElement | null {
+  const cw = Math.max(1, Math.round(w));
+  const ch = Math.max(1, Math.round(h));
+  const canvas = document.createElement("canvas");
+  canvas.width = cw;
+  canvas.height = ch;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  if (cropPx) {
+    ctx.drawImage(photo, cropPx.x, cropPx.y, cropPx.width, cropPx.height, 0, 0, cw, ch);
+  } else {
+    ctx.drawImage(photo, 0, 0, cw, ch);
+  }
+  ctx.globalCompositeOperation = "destination-in";
+  ctx.drawImage(matte, 0, 0, cw, ch);
+  return canvas;
+}
+
+function imageFilterProps(f?: Record<string, number>): {
+  filters?: ImageFilter[];
+  props: Record<string, number>;
+} {
+  if (!f) return { filters: undefined, props: {} };
+  const filters: ImageFilter[] = [];
+  const props: Record<string, number> = {};
+  if (f.brightness !== undefined && f.brightness !== 1) {
+    filters.push(Konva.Filters.Brighten as ImageFilter);
+    props.brightness = (f.brightness - 1) * 255;
+  }
+  if ((f.saturation !== undefined && f.saturation !== 1) || (f.hue !== undefined && f.hue !== 0)) {
+    filters.push(Konva.Filters.HSL as ImageFilter);
+    if (f.saturation !== undefined) props.saturation = Math.log2(f.saturation);
+    if (f.hue !== undefined) props.hue = f.hue;
+  }
+  if (f.contrast !== undefined && f.contrast !== 1) {
+    filters.push(Konva.Filters.Contrast as ImageFilter);
+    props.contrast = Math.sqrt(f.contrast) * 100 - 100;
+  }
+  if ((f.blur ?? 0) > 0) {
+    filters.push(Konva.Filters.Blur as ImageFilter);
+    props.blurRadius = f.blur * 3;
+  }
+  return { filters: filters.length ? filters : undefined, props };
+}
+
+function layerLabel(el: AlbumElement): string {
+  if (el.type === "image") return el.photoId ? "Image" : "Image (empty)";
+  if (el.type === "text") {
+    const content = (el.text as { content?: string } | null)?.content ?? "";
+    return `Text: ${content.slice(0, 24) || "…"}`;
+  }
+  if (el.type === "shape") return `Shape: ${(el.style as { shape?: string } | null)?.shape ?? "rect"}`;
+  if (el.type === "graphic") return "Graphic";
+  return el.type;
+}
+
+function FilterSlider({
+  label,
+  min,
+  max,
+  step = 1,
+  value,
+  display,
+  onChange,
+  onEditStart,
+  onEditEnd,
+}: {
+  label: string;
+  min: number;
+  max: number;
+  step?: number;
+  value: number;
+  display: (v: number) => string;
+  onChange: (v: number) => void;
+  onEditStart: () => void;
+  onEditEnd: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-16 shrink-0 text-[11px] text-slate-500">{label}</span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onPointerDown={onEditStart}
+        onChange={(e) => onChange(Number(e.target.value))}
+        onPointerUp={onEditEnd}
+        onBlur={onEditEnd}
+        className="flex-1"
+      />
+      <span className="w-10 text-right text-[11px] tabular-nums text-slate-500">{display(value)}</span>
+    </div>
+  );
+}
 
 interface LayoutOption {
   key: string;
@@ -65,9 +176,9 @@ export default function AlbumEditor({
 }) {
   const aspect = pageSize.width / pageSize.height;
   const PAGE_H = PAGE_W / aspect;
-
-  const [pageIndex, setPageIndex] = useState(0);  const [pagesState, setPagesState] = useState<AlbumPage[]>(pages);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [pagesState, setPagesState] = useState<AlbumPage[]>(pages);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [history, setHistory] = useState<AlbumPage[][]>([]);
   const [future, setFuture] = useState<AlbumPage[][]>([]);
   const [saving, setSaving] = useState(false);
@@ -75,6 +186,37 @@ export default function AlbumEditor({
   const [prompt, setPrompt] = useState<{ title: string; initial: string; onConfirm: (v: string) => void } | null>(null);
   const [assets, setAssets] = useState<DesignAsset[]>([]);
   const [designs, setDesigns] = useState<PageDesign[]>([]);
+  const [panelOpen, setPanelOpen] = useState(true);
+  const [elemQuery, setElemQuery] = useState("");
+  const [elemCat, setElemCat] = useState("All");
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [guides, setGuides] = useState<{ x?: number; y?: number }>({});
+  const [cropModeId, setCropModeId] = useState<string | null>(null);
+  const stageRef = useRef<Konva.Stage>(null);
+  const srcDimsRef = useRef<Record<string, { w: number; h: number }>>({});
+  const liveRef = useRef<AlbumPage[]>([]);
+  const liveSnapRef = useRef<AlbumPage[] | null>(null);
+  const liveDirtyRef = useRef(false);
+  const autosaveTimer = useRef<number | null>(null);
+  const [eventType, setEventType] = useState("wedding");
+  const [suggesting, setSuggesting] = useState(false);
+  const [segmenting, setSegmenting] = useState<string | null>(null);
+  const [recentColors, setRecentColors] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("af-recent-colors") ?? "[]") as string[];
+    } catch {
+      return [];
+    }
+  });
+
+  function pushColor(c: string) {
+    setRecentColors((prev) => {
+      const next = [c, ...prev.filter((x) => x !== c)].slice(0, 8);
+      localStorage.setItem("af-recent-colors", JSON.stringify(next));
+      return next;
+    });
+  }
 
   useEffect(() => {
     window.albumforge.assets.list().then(setAssets);
@@ -91,9 +233,17 @@ export default function AlbumEditor({
     setPagesState(pages);
   }, [pages]);
 
+  // Leave crop/pan mode when switching pages.
+  useEffect(() => {
+    setCropModeId(null);
+  }, [pageIndex]);
+
   const page = pagesState[pageIndex];
   const elements = page?.elements ?? [];
-  const selected = elements.find((e) => e.id === selectedId);
+  const selected = elements.find((e) => e.id === [...selectedIds][selectedIds.size - 1]);
+  const selectedFilters = (selected?.style as { filters?: Record<string, number> } | null)?.filters ?? {};
+  const selectedBlend = (selected?.style as { blendMode?: string } | null)?.blendMode ?? "";
+  const selectedMask = (selected?.style as { mask?: { kind?: string } | null } | null)?.mask?.kind === "alpha";
   const bg = (page?.background as { color?: string; pattern?: string } | null) ?? {};
   const bgColor = bg.color ?? "#ffffff";
   const bgPattern = bg.pattern ?? null;
@@ -101,10 +251,67 @@ export default function AlbumEditor({
   const spread = page?.isSpread ?? false;
   const canvasW = spread ? PAGE_W * 2 : PAGE_W;
 
+  function selectOne(id: string, additive: boolean) {
+    if (additive) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+      return;
+    }
+    setSelectedIds(new Set([id]));
+    setCropModeId((c) => (c && c !== id ? null : c));
+  }
+
+  function scheduleAutosave(next: AlbumPage[]) {
+    if (autosaveTimer.current) window.clearTimeout(autosaveTimer.current);
+    autosaveTimer.current = window.setTimeout(() => {
+      void persist(next);
+    }, 1200);
+  }
+
   function commit(next: AlbumPage[]) {
     setHistory((h) => [...h, pagesState]);
     setFuture([]);
     setPagesState(next);
+    scheduleAutosave(next);
+  }
+
+  /** Live (no-history) element patch for high-frequency edits (crop pan/zoom). */
+  function updateElementLive(elId: string, patch: Record<string, unknown>) {
+    setPagesState((prev) => {
+      const next = prev.map((p) =>
+        p.id === page.id
+          ? { ...p, elements: p.elements.map((e) => (e.id === elId ? { ...e, ...patch } : e)) }
+          : p,
+      );
+      liveRef.current = next;
+      return next;
+    });
+    liveDirtyRef.current = true;
+  }
+
+  /** Start a live edit — snapshot pre-edit state so undo returns to it. */
+  function startLiveEdit() {
+    liveSnapRef.current = pagesState;
+    liveRef.current = pagesState;
+    liveDirtyRef.current = false;
+  }
+
+  /** End a live edit — fold the working copy into history once and autosave. */
+  function endLiveEdit() {
+    const snap = liveSnapRef.current;
+    liveSnapRef.current = null;
+    if (!liveDirtyRef.current) return;
+    liveDirtyRef.current = false;
+    const next = liveRef.current;
+    if (!next) return;
+    setHistory((h) => [...h, ...(snap ? [snap] : [])]);
+    setFuture([]);
+    setPagesState(next);
+    scheduleAutosave(next);
   }
 
   function undo() {
@@ -144,7 +351,7 @@ export default function AlbumEditor({
         })),
       });
       setPagesState((prev) => prev.map((x) => (x.id === p.id ? updated : x)));
-      setSelectedId(null);
+      setSelectedIds(new Set());
       onPageUpdated(updated);
       toast("Page saved");
     } finally {
@@ -199,10 +406,221 @@ export default function AlbumEditor({
   }
 
   function deleteSelected() {
-    if (!selected) return;
+    if (selectedIds.size === 0) return;
     void persist(
-      pagesState.map((p) => (p.id === page.id ? { ...p, elements: p.elements.filter((e) => e.id !== selected.id) } : p)),
+      pagesState.map((p) =>
+        p.id === page.id ? { ...p, elements: p.elements.filter((e) => !selectedIds.has(e.id)) } : p,
+      ),
     );
+    setSelectedIds(new Set());
+  }
+
+  function snapDrag(node: Konva.Group, el: AlbumElement) {
+    const w = el.width;
+    const h = el.height;
+    const x = node.x() / canvasW;
+    const y = node.y() / PAGE_H;
+    const SNAP = 6 / canvasW;
+    let gx: number | undefined;
+    let gy: number | undefined;
+    const others = elements.filter((e) => e.id !== el.id && !selectedIds.has(e.id));
+    const targetsX = [0, 0.5, 1, ...others.flatMap((e) => [e.x, e.x + e.width, e.x + e.width / 2])];
+    const targetsY = [0, 0.5, 1, ...others.flatMap((e) => [e.y, e.y + e.height, e.y + e.height / 2])];
+    for (const t of targetsX) {
+      for (const [off, val] of [[0, x], [w, x + w], [w / 2, x + w / 2]] as const) {
+        if (Math.abs(val - t) < SNAP) {
+          gx = t - off;
+          node.x(gx * canvasW);
+        }
+      }
+    }
+    for (const t of targetsY) {
+      for (const [off, val] of [[0, y], [h, y + h], [h / 2, y + h / 2]] as const) {
+        if (Math.abs(val - t) < SNAP) {
+          gy = t - off;
+          node.y(gy * PAGE_H);
+        }
+      }
+    }
+    setGuides({ x: gx, y: gy });
+  }
+
+  function alignSel(mode: "left" | "centerH" | "right" | "top" | "middleV" | "bottom") {
+    const sels = elements.filter((e) => selectedIds.has(e.id));
+    if (sels.length === 0) return;
+    const minX = Math.min(...sels.map((e) => e.x));
+    const maxX = Math.max(...sels.map((e) => e.x + e.width));
+    const minY = Math.min(...sels.map((e) => e.y));
+    const maxY = Math.max(...sels.map((e) => e.y + e.height));
+    const next = elements.map((e) => {
+      if (!selectedIds.has(e.id)) return e;
+      const box = { x: e.x, y: e.y };
+      if (mode === "left") box.x = minX;
+      if (mode === "right") box.x = maxX - e.width;
+      if (mode === "centerH") box.x = (minX + maxX) / 2 - e.width / 2;
+      if (mode === "top") box.y = minY;
+      if (mode === "bottom") box.y = maxY - e.height;
+      if (mode === "middleV") box.y = (minY + maxY) / 2 - e.height / 2;
+      return { ...e, ...box };
+    });
+    commit(pagesState.map((p) => (p.id === page.id ? { ...p, elements: next } : p)));
+  }
+
+  /** Current zoom factor (1× = full cover crop) of an image element. */
+  function cropZoomValue(el: AlbumElement): number {
+    const dims = srcDimsRef.current[el.id];
+    if (!dims) return 1;
+    const cover = coverCrop(dims.w, dims.h, el.width * canvasW, el.height * PAGE_H);
+    const cur = el.crop ?? cover;
+    return Math.max(1, cover.width / (cur.width || cover.width));
+  }
+
+  /** Zoom an image's crop around its centre (1× = full object-fit cover frame). */
+  function setCropZoom(el: AlbumElement, zoom: number) {
+    const dims = srcDimsRef.current[el.id];
+    if (!dims) return;
+    const cover = coverCrop(dims.w, dims.h, el.width * canvasW, el.height * PAGE_H);
+    const cur = el.crop ?? cover;
+    updateElementLive(el.id, { crop: zoomCropRect(cur, cover, zoom) });
+  }
+
+  /** Return an image to the automatic object-fit cover crop. */
+  function resetCrop(el: AlbumElement) {
+    updateElement(el.id, { crop: null });
+    setCropModeId(null);
+  }
+
+  /** On-device subject cutout: segment the selected photo and mask the element. */
+  async function removeBackground() {
+    if (!selected || selected.type !== "image" || !selected.photoId) return;
+    // Toggle off when the subject is already isolated.
+    if (selectedMask) {
+      updateElement(selected.id, { style: { ...(selected.style ?? {}), mask: undefined } });
+      toast("Background restored");
+      return;
+    }
+    setSegmenting(selected.id);
+    try {
+      const res = await window.albumforge.photos.segment(selected.photoId);
+      if (res.ok) {
+        updateElement(selected.id, {
+          style: { ...(selected.style ?? {}), mask: { kind: "alpha" } },
+        });
+        toast("Background removed — layer ornaments behind the subject");
+      } else {
+        toast(`Segmentation failed: ${res.error ?? "unknown error"}`);
+      }
+    } finally {
+      setSegmenting(null);
+    }
+  }
+
+  const FILTER_DEFAULTS: Record<string, number> = { brightness: 1, saturation: 1, hue: 0, contrast: 1, blur: 0 };
+
+  /** Live-edit a single filter channel (dropped from the stored object at its neutral value). */
+  function setFilter(elId: string, key: string, value: number) {
+    const el = elements.find((e) => e.id === elId);
+    const f = { ...((el?.style as { filters?: Record<string, number> } | null)?.filters ?? {}) };
+    if (Math.abs(value - (FILTER_DEFAULTS[key] ?? 0)) < 1e-4) delete f[key];
+    else f[key] = value;
+    updateElementLive(elId, {
+      style: { ...(el?.style ?? {}), filters: Object.keys(f).length ? f : undefined },
+    });
+  }
+
+  /** Drop a dragged photo onto a specific position on the page. */
+  function addPhotoAt(photoId: string, x: number, y: number, width: number, height: number) {
+    const maxZ = elements.reduce((m, e) => Math.max(m, e.z), -1);
+    const el: AlbumElement = {
+      id: `new-${Date.now()}`,
+      type: "image",
+      z: maxZ + 1,
+      x,
+      y,
+      width,
+      height,
+      rotation: 0,
+      photoId,
+      crop: null,
+      text: null,
+      style: null,
+    };
+    void persist(mutateElements([...elements, el]));
+  }
+
+  /** Smart Frame drag-and-drop: photo dropped onto a frame → replace with cover-crop; empty canvas → add. */
+  function handleCanvasDrop(e: React.DragEvent) {
+    e.preventDefault();
+    const raw = e.dataTransfer.getData("application/x-albumforge-photo");
+    if (!raw) return;
+    let data: { id: string; w?: number | null; h?: number | null };
+    try {
+      data = JSON.parse(raw) as { id: string; w?: number | null; h?: number | null };
+    } catch {
+      return;
+    }
+    const stage = stageRef.current;
+    if (!stage || !data.id) return;
+
+    // Map the screen drop point into stage-local coordinates (accounts for zoom + pan).
+    const rect = stage.container().getBoundingClientRect();
+    const inv = stage.getAbsoluteTransform().copy().invert();
+    const pos = inv.point({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+
+    // Smart frame hit test — walk up from the topmost shape to the owning element group.
+    let hitEl: AlbumElement | undefined;
+    const top = stage.getIntersection(pos);
+    let n: Konva.Node | null = top;
+    while (n && n !== stage) {
+      const nid = n.id();
+      if (nid && elements.some((el) => el.id === nid)) {
+        hitEl = elements.find((el) => el.id === nid);
+        break;
+      }
+      n = n.getParent();
+    }
+
+    // 1) Dropped onto a frame → replace the photo; crop: null = auto object-fit cover.
+    if (hitEl?.type === "image") {
+      void persist(
+        pagesState.map((p) =>
+          p.id === page.id
+            ? {
+                ...p,
+                elements: p.elements.map((x) => (x.id === hitEl!.id ? { ...x, photoId: data.id, crop: null } : x)),
+              }
+            : p,
+        ),
+      );
+      setPicker(null);
+      return;
+    }
+
+    // 2) Replace mode with an active selection → replace it in place.
+    if (picker === "replace" && selected) {
+      void persist(
+        pagesState.map((p) =>
+          p.id === page.id
+            ? {
+                ...p,
+                elements: p.elements.map((x) => (x.id === selected.id ? { ...x, photoId: data.id, crop: null } : x)),
+              }
+            : p,
+        ),
+      );
+      setPicker(null);
+      return;
+    }
+
+    // 3) Dropped on empty canvas → add a new photo centred on the drop point.
+    const pw = data.w ?? 1;
+    const ph = data.h ?? 1;
+    const newH = 0.5;
+    const newW = Math.max(0.2, Math.min(0.92, (newH * PAGE_H * pw) / (ph * canvasW)));
+    const px = Math.min(Math.max((pos.x - 40) / canvasW - newW / 2, 0), 1 - newW);
+    const py = Math.min(Math.max((pos.y - 40) / PAGE_H - newH / 2, 0), 1 - newH);
+    addPhotoAt(data.id, px, py, newW, newH);
+    setPicker(null);
   }
 
   function addText() {
@@ -339,31 +757,22 @@ export default function AlbumEditor({
       elements: merged.map((e) => ({ ...e, z: e.z ?? 0 })),
     });
     setPagesState((prev) => prev.map((p) => (p.id === page.id ? updated : p)));
-    setSelectedId(null);
+    setSelectedIds(new Set());
     onPageUpdated(updated);
   }
 
-  function moveSelectedZ(delta: number) {
-    if (!selected) return;
-    const sorted = [...elements].sort((a, b) => a.z - b.z);
-    const idx = sorted.findIndex((e) => e.id === selected.id);
-    const target = idx + delta;
-    if (idx < 0 || target < 0 || target >= sorted.length) return;
-    const zA = sorted[idx].z;
-    const zB = sorted[target].z;
-    const next = elements.map((e) =>
-      e.id === sorted[idx].id ? { ...e, z: zB } : e.id === sorted[target].id ? { ...e, z: zA } : e,
-    );
-    void persist(
-      pagesState.map((p) => (p.id === page.id ? { ...p, elements: next.sort((a, b) => a.z - b.z) } : p)),
-    );
+  /** Apply a stacking operation to a layer (front/back/forward/backward). */
+  function layerOp(id: string, op: LayerOp) {
+    const next = reorderLayer(elements, id, op);
+    if (next === elements) return;
+    commit(pagesState.map((p) => (p.id === page.id ? { ...p, elements: next } : p)));
   }
 
   async function changeLayout(layoutKey: string) {
     if (!page) return;
     const updated = await window.albumforge.albums.recomposePage(albumId, page.id, layoutKey);
     setPagesState((prev) => prev.map((p) => (p.id === page.id ? updated : p)));
-    setSelectedId(null);
+    setSelectedIds(new Set());
     onPageUpdated(updated);
   }
 
@@ -377,6 +786,53 @@ export default function AlbumEditor({
     const p = { ...page, background: { color: bgColor, pattern: patternId || null } };
     setPagesState((prev) => prev.map((x) => (x.id === p.id ? p : x)));
     void persist(pagesState.map((x) => (x.id === p.id ? p : x)));
+  }
+
+  /** Apply an AI design suggestion (palette + event rules) to the current page. */
+  async function applySuggestion() {
+    const photoIds = elements.filter((e) => e.type === "image" && e.photoId).map((e) => e.photoId as string);
+    setSuggesting(true);
+    try {
+      const sugg = await window.albumforge.recommend.suggest(photoIds, eventType);
+      let nextElements = elements.map((e, i) => {
+        // Retitle the first text element with the suggested display font.
+        if (e.type === "text" && elements.findIndex((x) => x.type === "text") === i) {
+          return { ...e, style: { ...(e.style ?? {}), fontFamily: sugg.titleFont } };
+        }
+        return e;
+      });
+      if (sugg.ornament) {
+        const maxZ = elements.reduce((m, e) => Math.max(m, e.z), -1);
+        nextElements = [
+          ...nextElements,
+          {
+            id: `new-${Date.now()}`,
+            type: "graphic" as const,
+            z: maxZ + 1,
+            x: sugg.ornament.x,
+            y: sugg.ornament.y,
+            width: sugg.ornament.width,
+            height: sugg.ornament.height,
+            rotation: 0,
+            photoId: null,
+            crop: null,
+            text: null,
+            style: {
+              graphicId: sugg.ornament.graphicId,
+              color: sugg.ornament.color,
+              opacity: sugg.ornament.opacity,
+            },
+          },
+        ];
+      }
+      const p = { ...page, background: { color: sugg.background.color, pattern: sugg.background.pattern } };
+      commit(pagesState.map((x) => (x.id === p.id ? { ...p, elements: nextElements } : x)));
+      toast(`Suggested: ${sugg.rationale}`);
+    } catch {
+      toast("Couldn't generate a suggestion");
+    } finally {
+      setSuggesting(false);
+    }
   }
 
   async function addPage() {
@@ -403,7 +859,7 @@ export default function AlbumEditor({
     const next = pagesState.filter((p) => p.id !== page.id).map((p, i) => ({ ...p, index: i }));
     setPagesState(next);
     onPagesChanged(next);
-    setSelectedId(null);
+    setSelectedIds(new Set());
     setPageIndex((i) => Math.min(i, Math.max(0, next.length - 1)));
   }
 
@@ -428,17 +884,22 @@ export default function AlbumEditor({
     (el: { id: string }) => (e: Konva.KonvaEventObject<DragEvent>) => {
       const node = e.target as Konva.Group;
       updateElement(el.id, { x: node.x() / canvasW, y: node.y() / PAGE_H });
+      setGuides({});
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [page?.id, PAGE_H, canvasW, pagesState],
   );
 
   useEffect(() => {
-    if (trRef.current && selectedId) {
-      const node = nodeRefs.current[selectedId];
-      if (node) trRef.current.nodes([node]);
+    if (trRef.current) {
+      const nodes = cropModeId
+        ? []
+        : [...selectedIds]
+            .map((id) => nodeRefs.current[id])
+            .filter((n): n is Konva.Group => !!n);
+      trRef.current.nodes(nodes);
     }
-  }, [selectedId, elements, pageIndex]);
+  }, [selectedIds, elements, pageIndex, cropModeId]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -455,7 +916,16 @@ export default function AlbumEditor({
       } else if (mod && e.key.toLowerCase() === "y") {
         e.preventDefault();
         redo();
-      } else if ((e.key === "Delete" || e.key === "Backspace") && selectedId) {
+      } else if (e.key === "Escape" && cropModeId) {
+        e.preventDefault();
+        setCropModeId(null);
+      } else if (mod && e.key === "]") {
+        e.preventDefault();
+        if (selected) layerOp(selected.id, e.shiftKey ? "front" : "forward");
+      } else if (mod && e.key === "[") {
+        e.preventDefault();
+        if (selected) layerOp(selected.id, e.shiftKey ? "back" : "backward");
+      } else if ((e.key === "Delete" || e.key === "Backspace") && selectedIds.size > 0) {
         e.preventDefault();
         deleteSelected();
       }
@@ -589,9 +1059,28 @@ export default function AlbumEditor({
           </div>
         </aside>
 
-        <section className="flex flex-1 items-center justify-center overflow-auto rounded-2xl bg-neutral-200/90 p-6">
+        <section
+          className="flex flex-1 items-center justify-center overflow-auto rounded-2xl bg-neutral-200/90 p-6"
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={handleCanvasDrop}
+        >
           <div className="shadow-2xl shadow-slate-900/20">
-        <Stage width={canvasW + 80} height={PAGE_H + 80}>
+        <Stage
+          ref={stageRef}
+          width={canvasW + 80}
+          height={PAGE_H + 80}
+          scaleX={zoom}
+          scaleY={zoom}
+          x={pan.x}
+          y={pan.y}
+          draggable
+          onDragEnd={(e) => setPan({ x: e.target.x(), y: e.target.y() })}
+          onWheel={(e) => {
+            e.evt.preventDefault();
+            const next = e.evt.deltaY < 0 ? zoom * 1.15 : zoom / 1.15;
+            setZoom(Math.max(0.4, Math.min(3, +(next.toFixed(2)))));
+          }}
+        >
           <Layer>
             <Rect
               x={40}
@@ -600,7 +1089,10 @@ export default function AlbumEditor({
               height={PAGE_H}
               fill={bgColor}
               stroke="#ccc"
-              onClick={() => setSelectedId(null)}
+              onClick={() => {
+                setSelectedIds(new Set());
+                setCropModeId(null);
+              }}
             />
             {patternImg && (
               <Rect
@@ -644,31 +1136,64 @@ export default function AlbumEditor({
                 />
               </>
             )}
-            {elements.map((el) => (
-              <ElementNode
-                key={el.id}
-                el={el}
-                pageX={40}
-                pageY={40}
-                pageW={canvasW}
-                pageH={PAGE_H}
-                selected={selectedId === el.id}
-                nodeRef={(n) => {
-                  nodeRefs.current[el.id] = n;
-                }}
-                onSelect={() => setSelectedId(el.id)}
-                onDragEnd={onDragEnd(el)}
-                onTransformEnd={onTransformEnd(el)}
-                onEditTextRequest={(el) => {
-                  const content = (el.text as { content?: string } | null)?.content ?? "";
-                  setPrompt({
-                    title: "Edit text",
-                    initial: content,
-                    onConfirm: (v) => updateElement(el.id, { text: { content: v } }),
-                  });
-                }}
+            {guides.x !== undefined && (
+              <Line
+                points={[40 + guides.x * canvasW, 40, 40 + guides.x * canvasW, 40 + PAGE_H]}
+                stroke="#f43f5e"
+                strokeWidth={1}
+                dash={[4, 4]}
+                listening={false}
               />
-            ))}
+            )}
+            {guides.y !== undefined && (
+              <Line
+                points={[40, 40 + guides.y * PAGE_H, 40 + canvasW, 40 + guides.y * PAGE_H]}
+                stroke="#f43f5e"
+                strokeWidth={1}
+                dash={[4, 4]}
+                listening={false}
+              />
+            )}
+            {elements.map((el) => {
+              const cropMode = cropModeId === el.id;
+              return (
+                <ElementNode
+                  key={el.id}
+                  el={el}
+                  pageX={40}
+                  pageY={40}
+                  pageW={canvasW}
+                  pageH={PAGE_H}
+                  selected={selectedIds.has(el.id)}
+                  cropMode={cropMode}
+                  nodeRef={(n) => {
+                    nodeRefs.current[el.id] = n;
+                  }}
+                  onSelect={(evt) => selectOne(el.id, evt.evt.shiftKey)}
+                  onDragMove={(node) => snapDrag(node, el)}
+                  onDragEnd={onDragEnd(el)}
+                  onTransformEnd={onTransformEnd(el)}
+                  onImgLoad={(w, h) => {
+                    srcDimsRef.current[el.id] = { w, h };
+                  }}
+                  onEnterCropMode={() => {
+                    setCropModeId(el.id);
+                    setSelectedIds(new Set([el.id]));
+                  }}
+                  onCropDragStart={() => startLiveEdit()}
+                  onCropPan={(crop) => updateElementLive(el.id, { crop })}
+                  onCropDragEnd={() => endLiveEdit()}
+                  onEditTextRequest={(el) => {
+                    const content = (el.text as { content?: string } | null)?.content ?? "";
+                    setPrompt({
+                      title: "Edit text",
+                      initial: content,
+                      onConfirm: (v) => updateElement(el.id, { text: { content: v } }),
+                    });
+                  }}
+                />
+              );
+            })}
             <Transformer ref={trRef} rotateEnabled anchorSize={8} />
           </Layer>
         </Stage>
@@ -677,6 +1202,75 @@ export default function AlbumEditor({
 
         {/* Inspector */}
         <aside className="w-72 shrink-0 space-y-3 overflow-y-auto">
+          <section className="card p-4">
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Layers</h3>
+            {elements.length === 0 ? (
+              <p className="text-xs text-slate-400">No elements on this page.</p>
+            ) : (
+              <div className="space-y-1">
+                {[...elements]
+                  .sort((a, b) => b.z - a.z)
+                  .map((el) => (
+                    <div
+                      key={el.id}
+                      onClick={() => selectOne(el.id, false)}
+                      className={`flex cursor-pointer items-center gap-1 rounded-lg border px-2 py-1.5 text-xs ${
+                        selectedIds.has(el.id)
+                          ? "border-indigo-400 bg-indigo-50 text-indigo-700"
+                          : "border-slate-100 hover:border-slate-200"
+                      }`}
+                    >
+                      <span className="flex-1 truncate">{layerLabel(el)}</span>
+                      <button
+                        className="opacity-50 hover:opacity-100"
+                        title="Bring to front"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          selectOne(el.id, false);
+                          layerOp(el.id, "front");
+                        }}
+                      >
+                        ⤒
+                      </button>
+                      <button
+                        className="opacity-50 hover:opacity-100"
+                        title="Move forward"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          selectOne(el.id, false);
+                          layerOp(el.id, "forward");
+                        }}
+                      >
+                        ↑
+                      </button>
+                      <button
+                        className="opacity-50 hover:opacity-100"
+                        title="Move backward"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          selectOne(el.id, false);
+                          layerOp(el.id, "backward");
+                        }}
+                      >
+                        ↓
+                      </button>
+                      <button
+                        className="opacity-50 hover:opacity-100"
+                        title="Send to back"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          selectOne(el.id, false);
+                          layerOp(el.id, "back");
+                        }}
+                      >
+                        ⤓
+                      </button>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </section>
+
           <section className="card p-4">
             <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Page</h3>
             {layouts.length > 0 && (
@@ -711,6 +1305,27 @@ export default function AlbumEditor({
                 ))}
               </select>
             </div>
+            <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">
+              <label className="field-label">AI suggest (event type)</label>
+              <select value={eventType} onChange={(e) => setEventType(e.target.value)} className="input">
+                <option value="wedding">Wedding</option>
+                <option value="mehndi">Mehndi</option>
+                <option value="baraat">Baraat</option>
+                <option value="sangeet">Sangeet</option>
+                <option value="reception">Reception</option>
+              </select>
+              <button
+                onClick={() => void applySuggestion()}
+                disabled={suggesting}
+                className="btn-primary w-full !px-2 !py-1.5 text-xs"
+              >
+                {suggesting ? "Suggesting…" : "✨ Suggest design"}
+              </button>
+              <p className="text-[11px] text-slate-400">
+                Reads the page's photos, extracts the palette, and applies a background, ornament
+                and title font.
+              </p>
+            </div>
           </section>
 
           <section className="card p-4">
@@ -741,22 +1356,195 @@ export default function AlbumEditor({
           {selected && (
             <section className="card p-4">
               <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Element</h3>
-              <div className="mb-3 flex gap-1.5">
-                <button onClick={() => moveSelectedZ(1)} className="btn-secondary flex-1 !px-2 !py-1.5 text-xs">
+              <div className="mb-3 grid grid-cols-3 gap-1.5">
+                <button
+                  onClick={() => layerOp(selected.id, "forward")}
+                  className="btn-secondary !px-2 !py-1.5 text-xs"
+                  title="Move forward (Ctrl+])"
+                >
                   Forward
                 </button>
-                <button onClick={() => moveSelectedZ(-1)} className="btn-secondary flex-1 !px-2 !py-1.5 text-xs">
+                <button
+                  onClick={() => layerOp(selected.id, "backward")}
+                  className="btn-secondary !px-2 !py-1.5 text-xs"
+                  title="Move backward (Ctrl+[)"
+                >
                   Backward
                 </button>
+                <button
+                  onClick={() => layerOp(selected.id, "front")}
+                  className="btn-secondary !px-2 !py-1.5 text-xs"
+                  title="Bring to front (Ctrl+Shift+])"
+                >
+                  Front
+                </button>
+                <button
+                  onClick={() => layerOp(selected.id, "back")}
+                  className="btn-secondary !px-2 !py-1.5 text-xs"
+                  title="Send to back (Ctrl+Shift+[)"
+                >
+                  Back
+                </button>
                 {selected.type === "image" && (
-                  <button onClick={() => setPicker("replace")} className="btn-secondary flex-1 !px-2 !py-1.5 text-xs">
+                  <button onClick={() => setPicker("replace")} className="btn-secondary !px-2 !py-1.5 text-xs">
                     Replace
                   </button>
                 )}
-                <button onClick={deleteSelected} className="btn-secondary flex-1 !px-2 !py-1.5 text-xs !text-red-500">
+                <button onClick={deleteSelected} className="btn-secondary !px-2 !py-1.5 text-xs !text-red-500">
                   Delete
                 </button>
               </div>
+              <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">
+                <div>
+                  <label className="field-label">Blend mode</label>
+                  <select
+                    value={selectedBlend}
+                    onChange={(e) =>
+                      updateElement(selected.id, {
+                        style: { ...(selected.style ?? {}), blendMode: e.target.value || undefined },
+                      })
+                    }
+                    className="input"
+                  >
+                    <option value="">Normal</option>
+                    <option value="multiply">Multiply</option>
+                    <option value="screen">Screen</option>
+                    <option value="overlay">Overlay</option>
+                    <option value="soft-light">Soft light</option>
+                  </select>
+                </div>
+                {selected.type === "image" && (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="field-label !mb-0">Filters</label>
+                      <button
+                        onClick={() =>
+                          updateElement(selected.id, {
+                            style: { ...(selected.style ?? {}), filters: undefined },
+                          })
+                        }
+                        className="btn-ghost !px-1.5 !py-0.5 text-[11px]"
+                      >
+                        Reset
+                      </button>
+                    </div>
+                    <FilterSlider
+                      label="Brightness"
+                      min={50}
+                      max={150}
+                      value={Math.round((selectedFilters.brightness ?? 1) * 100)}
+                      display={(v) => `${v}%`}
+                      onChange={(v) => setFilter(selected.id, "brightness", v / 100)}
+                      onEditStart={startLiveEdit}
+                      onEditEnd={endLiveEdit}
+                    />
+                    <FilterSlider
+                      label="Saturation"
+                      min={0}
+                      max={200}
+                      value={Math.round((selectedFilters.saturation ?? 1) * 100)}
+                      display={(v) => `${v}%`}
+                      onChange={(v) => setFilter(selected.id, "saturation", v / 100)}
+                      onEditStart={startLiveEdit}
+                      onEditEnd={endLiveEdit}
+                    />
+                    <FilterSlider
+                      label="Hue"
+                      min={-180}
+                      max={180}
+                      value={Math.round(selectedFilters.hue ?? 0)}
+                      display={(v) => `${v}°`}
+                      onChange={(v) => setFilter(selected.id, "hue", v)}
+                      onEditStart={startLiveEdit}
+                      onEditEnd={endLiveEdit}
+                    />
+                    <FilterSlider
+                      label="Contrast"
+                      min={50}
+                      max={150}
+                      value={Math.round((selectedFilters.contrast ?? 1) * 100)}
+                      display={(v) => `${v}%`}
+                      onChange={(v) => setFilter(selected.id, "contrast", v / 100)}
+                      onEditStart={startLiveEdit}
+                      onEditEnd={endLiveEdit}
+                    />
+                    <FilterSlider
+                      label="Blur"
+                      min={0}
+                      max={10}
+                      step={0.5}
+                      value={selectedFilters.blur ?? 0}
+                      display={(v) => `${v.toFixed(1)}px`}
+                      onChange={(v) => setFilter(selected.id, "blur", v)}
+                      onEditStart={startLiveEdit}
+                      onEditEnd={endLiveEdit}
+                    />
+                  </div>
+                )}
+              </div>
+              {selected.type === "image" && (
+                <div className="space-y-2 border-t border-slate-100 pt-3">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => void removeBackground()}
+                      disabled={segmenting === selected.id || !selected.photoId}
+                      className="btn-secondary flex-1 !px-2 !py-1.5 text-xs"
+                    >
+                      {segmenting === selected.id
+                        ? "Segmenting…"
+                        : selectedMask
+                          ? "Restore background"
+                          : "Remove background"}
+                    </button>
+                    <span className="text-[11px] text-slate-400">on-device</span>
+                  </div>
+                  {selectedMask && !segmenting && (
+                    <p className="text-[11px] text-slate-400">
+                      Subject isolated — bring an ornament layer behind it (Layers panel ↓).
+                    </p>
+                  )}
+                </div>
+              )}
+              {selected.type === "image" && (
+                <div className="space-y-2 border-t border-slate-100 pt-3">
+                  <div className="flex items-center justify-between">
+                    <label className="field-label !mb-0">Crop / pan</label>
+                    {cropModeId === selected.id ? (
+                      <button onClick={() => setCropModeId(null)} className="btn-primary !px-2 !py-1 text-xs">
+                        Done
+                      </button>
+                    ) : (
+                      <span className="text-[11px] text-slate-400">double-click photo</span>
+                    )}
+                  </div>
+                  {cropModeId === selected.id && (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-500">Zoom</span>
+                        <input
+                          type="range"
+                          min={1}
+                          max={8}
+                          step={0.1}
+                          value={cropZoomValue(selected)}
+                          onPointerDown={() => startLiveEdit()}
+                          onChange={(e) => setCropZoom(selected, Number(e.target.value))}
+                          onPointerUp={() => endLiveEdit()}
+                          onBlur={() => endLiveEdit()}
+                          className="flex-1"
+                        />
+                        <span className="w-10 text-right text-xs tabular-nums text-slate-500">
+                          {cropZoomValue(selected).toFixed(1)}×
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400">Drag the photo inside the frame to pan.</p>
+                      <button onClick={() => resetCrop(selected)} className="btn-secondary w-full !px-2 !py-1.5 text-xs">
+                        Reset crop
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
               {selected.type === "text" && (
                 <div className="space-y-3">
                   <div>
@@ -914,6 +1702,7 @@ export default function AlbumEditor({
       {picker && (
         <PhotoPicker
           projectId={projectId}
+          mode={picker}
           onSelect={(id) => (picker === "add" ? addPhoto(id) : replacePhoto(id))}
           onClose={() => setPicker(null)}
         />
@@ -1021,11 +1810,18 @@ function ElementNode({
   pageW,
   pageH,
   selected,
+  cropMode = false,
   nodeRef,
   onSelect,
+  onDragMove,
   onDragEnd,
   onTransformEnd,
   onEditTextRequest,
+  onImgLoad,
+  onEnterCropMode,
+  onCropDragStart,
+  onCropPan,
+  onCropDragEnd,
 }: {
   el: AlbumElement;
   pageX: number;
@@ -1033,18 +1829,41 @@ function ElementNode({
   pageW: number;
   pageH: number;
   selected: boolean;
+  cropMode?: boolean;
   nodeRef: (n: Konva.Group | null) => void;
-  onSelect: () => void;
+  onSelect: (e: Konva.KonvaEventObject<MouseEvent>) => void;
+  onDragMove?: (node: Konva.Group) => void;
   onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => void;
   onTransformEnd: (e: Konva.KonvaEventObject<Event>) => void;
   onEditTextRequest: (el: AlbumElement) => void;
+  onImgLoad?: (w: number, h: number) => void;
+  onEnterCropMode?: () => void;
+  onCropDragStart?: () => void;
+  onCropPan?: (crop: CropRect) => void;
+  onCropDragEnd?: () => void;
 }) {
   const x = pageX + el.x * pageW;
   const y = pageY + el.y * pageH;
   const w = el.width * pageW;
   const h = el.height * pageH;
+  const dragOriginRef = useRef<{ x: number; y: number } | null>(null);
+  const styleMeta = (el.style ?? {}) as {
+    blendMode?: string;
+    filters?: Record<string, number>;
+    mask?: { kind?: string } | null;
+  };
+  const blendMode = styleMeta.blendMode;
+  const maskActive = styleMeta.mask?.kind === "alpha" && !!el.photoId;
 
   const img = useLoadedImage(el.photoId ? `media://preview1024/${el.photoId}` : undefined);
+  const matteImg = useLoadedImage(maskActive && el.photoId ? `media://matte/${el.photoId}` : undefined);
+
+  useEffect(() => {
+    if (el.type === "image" && img) {
+      onImgLoad?.(img.naturalWidth, img.naturalHeight);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [img]);
 
   if (el.type === "shape") {
     const s = (el.style ?? {}) as {
@@ -1074,16 +1893,18 @@ function ElementNode({
     return (
       <Group
         ref={nodeRef}
+        id={el.id}
         x={x}
         y={y}
         width={w}
         height={h}
         rotation={el.rotation}
         opacity={s.opacity ?? 1}
+        globalCompositeOperation={blendMode as GlobalCompositeOperation | undefined}
         draggable
         onClick={onSelect}
         onTap={onSelect}
-        onDragEnd={onDragEnd}
+        onDragMove={(e) => onDragMove?.(e.target as Konva.Group)} onDragEnd={onDragEnd}
         onTransformEnd={onTransformEnd}
       >
         {shapeNode}
@@ -1101,16 +1922,18 @@ function ElementNode({
     return (
       <Group
         ref={nodeRef}
+        id={el.id}
         x={x}
         y={y}
         width={w}
         height={h}
         rotation={el.rotation}
         opacity={opacity}
+        globalCompositeOperation={blendMode as GlobalCompositeOperation | undefined}
         draggable
         onClick={onSelect}
         onTap={onSelect}
-        onDragEnd={onDragEnd}
+        onDragMove={(e) => onDragMove?.(e.target as Konva.Group)} onDragEnd={onDragEnd}
         onTransformEnd={onTransformEnd}
       >
         {g && (
@@ -1131,13 +1954,15 @@ function ElementNode({
     return (
       <Group
         ref={nodeRef}
+        id={el.id}
         x={x}
         y={y}
+        globalCompositeOperation={blendMode as GlobalCompositeOperation | undefined}
         draggable
         onClick={onSelect}
         onTap={onSelect}
         onDblClick={() => onEditTextRequest(el)}
-        onDragEnd={onDragEnd}
+        onDragMove={(e) => onDragMove?.(e.target as Konva.Group)} onDragEnd={onDragEnd}
         onTransformEnd={onTransformEnd}
       >
         {el.type === "background" ? (
@@ -1177,26 +2002,65 @@ function ElementNode({
     }
   }
 
+  const fp = imageFilterProps(styleMeta.filters);
+  const maskedCanvas =
+    maskActive && img && matteImg && cropPx ? compositeMaskedCanvas(img, matteImg, cropPx, w, h) : null;
+
+  /** Crop/Pan mode: keep the frame fixed, move the crop window with the cursor instead. */
+  const panCropMove = (node: Konva.Group) => {
+    if (!dragOriginRef.current || !srcW || !srcH) return;
+    const dx = node.x() - dragOriginRef.current.x;
+    const dy = node.y() - dragOriginRef.current.y;
+    node.position({ x: dragOriginRef.current.x, y: dragOriginRef.current.y });
+    if (dx === 0 && dy === 0) return;
+    const cur = el.crop ?? coverCrop(srcW, srcH, w, h);
+    const next = panCropRect(cur, dx, dy, w, h);
+    if (next.x !== cur.x || next.y !== cur.y) onCropPan?.(next);
+  };
+
   return (
     <Group
       ref={nodeRef}
+      id={el.id}
       x={x}
       y={y}
       width={w}
       height={h}
       rotation={el.rotation}
+      globalCompositeOperation={blendMode as GlobalCompositeOperation | undefined}
       draggable
       onClick={onSelect}
       onTap={onSelect}
-      onDragEnd={onDragEnd}
-      onTransformEnd={onTransformEnd}
+      onDblClick={() => onEnterCropMode?.()}
+      onDragStart={
+        cropMode
+          ? (e) => {
+              const n = e.target as Konva.Group;
+              dragOriginRef.current = { x: n.x(), y: n.y() };
+              onCropDragStart?.();
+            }
+          : undefined
+      }
+      onDragMove={
+        cropMode ? (e) => panCropMove(e.target as Konva.Group) : (e) => onDragMove?.(e.target as Konva.Group)
+      }
+      onDragEnd={cropMode ? () => onCropDragEnd?.() : onDragEnd}
+      onTransformEnd={cropMode ? undefined : onTransformEnd}
     >
-      {img && cropPx ? (
-        <KImage image={img} crop={cropPx} width={w} height={h} />
+      {img && (maskedCanvas || cropPx) ? (
+        <KImage
+          image={maskedCanvas ?? img}
+          crop={maskedCanvas || !cropPx ? undefined : cropPx}
+          width={w}
+          height={h}
+          filters={fp.filters}
+          {...fp.props}
+        />
       ) : (
         <Rect width={w} height={h} fill="#eee" />
       )}
       {selected && <Rect width={w} height={h} stroke="#5b5bd6" strokeWidth={1} listening={false} />}
+      {cropMode && <Rect width={w} height={h} stroke="#f43f5e" strokeWidth={1.5} dash={[6, 4]} listening={false} />}
     </Group>
   );
 }

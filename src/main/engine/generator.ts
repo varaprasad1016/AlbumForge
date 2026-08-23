@@ -4,6 +4,7 @@ Pure and deterministic: same inputs → same album. Variations differ via seed-d
 layout stream, lead/hero selection, and bounded reordering for non-chronological
 families — while remaining professionally coherent.
 */
+import { timeBeats } from "./grouping";
 import { composePage } from "./layoutEngine";
 import { isSpreadLayout, LAYOUT_CATALOG } from "./layouts";
 import { Rng, seededRandom, shuffle } from "./rng";
@@ -74,9 +75,15 @@ export function generateAlbum(
   const rng = seededRandom(`${seed}:${family.key}:${variation}`);
   const ordered = orderPhotos(photos, family, variation, rng);
 
+  // Event beats: positions where a new day/ceremony begins (large capture gap).
+  // When a page lands exactly on a beat, open it with a dramatic spread.
+  const beats = timeBeats(ordered, spec.beatGapSeconds ?? 1800);
+  const beatStarts = new Set(beats.map((b) => b.index));
+
   const pages: AlbumResult["pages"] = [];
   const history: string[] = [];
   let remaining = ordered;
+  let consumed = 0;
 
   // Cover page: lead photo full-bleed with the album title (keep one photo
   // in reserve for the back cover).
@@ -101,10 +108,14 @@ export function generateAlbum(
   }
 
   while (remaining.length > 1 && pages.length < spec.pageCount) {
-    const layout = chooseLayout(family, remaining.length - 1, history, rng);
+    // A beat at the very start of the album is the opening page — handled by the
+    // cover; only real mid-album beats (consumed > 0) open with a spread.
+    const atBeat = consumed > 0 && beatStarts.has(consumed);
+    const layout = chooseLayout(family, remaining.length - 1, history, rng, atBeat ? { preferSpread: true } : undefined);
     const take = Math.min(layout.slots.length, remaining.length - 1);
     const pagePhotos = remaining.slice(0, take);
     remaining = remaining.slice(take);
+    consumed += take;
     const spread = isSpreadLayout(layout.key);
     const elements = composePage(layout, pagePhotos, spec.pageAspect * (spread ? 2 : 1));
     pages.push({ layoutKey: layout.key, spread, elements });

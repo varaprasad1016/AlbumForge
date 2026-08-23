@@ -42,6 +42,8 @@ export interface AlbumSpec {
   pageAspect: number; // page width / height
   style: PageStyle;
   coverTitle?: string | null;
+  /** Capture gap (seconds) above which a new event beat begins; spreads open beats. */
+  beatGapSeconds?: number;
 }
 
 export interface TemplateFamily {

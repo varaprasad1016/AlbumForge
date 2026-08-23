@@ -5,13 +5,15 @@ import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
 import { basename, extname, join } from "path";
 import { DB, newId, now } from "./db";
 import { analyzeImage, extractGps, extractTimestamp, generateThumbnails, imageInfo } from "./imaging";
-import { buildPdf, ExportPage, PhotoResolver, writeLabPackage } from "./export";
+import { buildPdf, ExportPage, MatteResolver, PhotoResolver, writeLabPackage } from "./export";
 import { buildProofGallery, importFeedback, photoNotes } from "./proofing";
 import { albumById, generateAndPersist, pageAspect, photoRecordById, photoRecordsFor } from "./generate";
 import { composePage } from "./engine/layoutEngine";
 import { isSpreadLayout, LAYOUT_CATALOG } from "./engine/layouts";
 import { segmentByTime } from "./engine/grouping";
 import { listFonts, readFont } from "./fonts";
+import { hasMatte, mattePath, segmentPhoto } from "./segment";
+import { suggestForPhotos } from "./recommend";
 import type {
   Album,
   AlbumElement,
@@ -32,6 +34,8 @@ const MIME_BY_EXT: Record<string, string> = {
   ".jpeg": "image/jpeg",
   ".png": "image/png",
   ".webp": "image/webp",
+  ".heic": "image/heic",
+  ".heif": "image/heif",
   ".tif": "image/tiff",
   ".tiff": "image/tiff",
 };
@@ -176,7 +180,7 @@ export function registerIpc(ctx: IpcContext): void {
     const res = await dialog.showOpenDialog(win!, {
       properties: ["openFile", "multiSelections"],
       filters: [
-        { name: "Images", extensions: ["jpg", "jpeg", "png", "webp", "tif", "tiff"] },
+        { name: "Images", extensions: ["jpg", "jpeg", "png", "webp", "heic", "heif", "tif", "tiff"] },
       ],
     });
     return res.canceled ? null : res.filePaths;
@@ -300,6 +304,39 @@ export function registerIpc(ctx: IpcContext): void {
 
   ipcMain.handle("designs:remove", (_e, id: string) => {
     db.prepare("DELETE FROM designs WHERE id = ?").run(id);
+  });
+
+  // ---- AI design recommendation (local palette + event rules) --------------
+  ipcMain.handle("recommend:suggest", async (_e, photoIds: string[], eventType: string) => {
+    const paths: string[] = [];
+    if (photoIds.length > 0) {
+      const placeholders = photoIds.map(() => "?").join(",");
+      const rows = db
+        .prepare(`SELECT preview_path FROM photos WHERE id IN (${placeholders})`)
+        .all(...photoIds) as Array<{ preview_path: string | null }>;
+      for (const r of rows) {
+        if (r.preview_path) paths.push(r.preview_path);
+      }
+    }
+    return suggestForPhotos(paths, eventType, listFonts().map((f) => f.family));
+  });
+
+  // ---- Subject segmentation (on-device background removal) -----------------
+  ipcMain.handle("photos:segment", async (_e, photoId: string) => {
+    const row = db.prepare("SELECT file_path FROM photos WHERE id = ?").get(photoId) as
+      | { file_path: string }
+      | undefined;
+    if (!row) return { ok: false, error: "Photo not found" };
+    if (hasMatte(cacheDir, photoId)) return { ok: true, cached: true };
+    try {
+      await segmentPhoto(row.file_path, cacheDir, photoId);
+      db.prepare(
+        "INSERT INTO subject_mattes (photo_id, matte_path, created_at) VALUES (?, ?, ?)",
+      ).run(photoId, mattePath(cacheDir, photoId), now());
+      return { ok: true, cached: false };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
   });
 
   // ---- Client proofing -----------------------------------------------------
@@ -833,6 +870,13 @@ export function registerIpc(ctx: IpcContext): void {
         return { path: p.file_path, width: p.width, height: p.height };
       };
 
+      const resolveMatte: MatteResolver = (photoId) => {
+        const m = db
+          .prepare("SELECT matte_path FROM subject_mattes WHERE photo_id = ?")
+          .get(photoId) as { matte_path: string } | undefined;
+        return m?.matte_path ?? null;
+      };
+
       const [widthMm, heightMm] = [
         album.pageSize.unit === "in" ? album.pageSize.width * 25.4 : album.pageSize.width,
         album.pageSize.unit === "in" ? album.pageSize.height * 25.4 : album.pageSize.height,
@@ -872,6 +916,7 @@ export function registerIpc(ctx: IpcContext): void {
           targetPath,
           album.name,
           (family) => readFont(family),
+          resolveMatte,
         );
         db.prepare("UPDATE exports SET status = 'completed', file_path = ? WHERE id = ?").run(outPath, exportId);
         return;
@@ -886,6 +931,7 @@ export function registerIpc(ctx: IpcContext): void {
         settings.bleedMm,
         watermark,
         (family) => readFont(family),
+        resolveMatte,
       );
       const outPath = targetPath ?? join(dataDir, "exports", `album-${album.id}.pdf`);
       mkdirSync(join(dataDir, "exports"), { recursive: true });

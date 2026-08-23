@@ -166,6 +166,12 @@ CREATE TABLE IF NOT EXISTS assets (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS subject_mattes (
+  photo_id TEXT PRIMARY KEY,
+  matte_path TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS designs (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,

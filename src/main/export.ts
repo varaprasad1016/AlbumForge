@@ -11,6 +11,32 @@ import { graphicSvg, shapeSvg, type GraphicStyle, type ShapeStyle } from "../sha
 const MM_PER_INCH = 25.4;
 const PT_PER_MM = 72 / MM_PER_INCH;
 
+const BLEND_MODES = new Set(["multiply", "screen", "overlay", "soft-light"]);
+
+function blendModeOf(el: ExportElement): string | undefined {
+  const bm = (el.style as { blendMode?: string } | null)?.blendMode;
+  return bm && BLEND_MODES.has(bm) ? bm : undefined;
+}
+
+/** Apply canonical per-layer filters with sharp, mirroring the Konva preview.
+ *  Canonical ranges: brightness/saturation/contrast multipliers (1 = neutral),
+ *  hue in degrees, blur sigma in px. */
+function applyImageFilters(pipeline: sharp.Sharp, filters?: Record<string, number>): sharp.Sharp {
+  if (!filters) return pipeline;
+  let p = pipeline;
+  const mod: { brightness?: number; saturation?: number; hue?: number } = {};
+  if (filters.brightness !== undefined && filters.brightness !== 1) mod.brightness = filters.brightness;
+  if (filters.saturation !== undefined && filters.saturation !== 1) mod.saturation = filters.saturation;
+  if (filters.hue !== undefined && filters.hue !== 0) mod.hue = filters.hue;
+  if (Object.keys(mod).length > 0) p = p.modulate(mod);
+  if (filters.contrast !== undefined && filters.contrast !== 1) {
+    const a = filters.contrast;
+    p = p.linear(a, 127.5 * (1 - a));
+  }
+  if ((filters.blur ?? 0) > 0) p = p.blur(filters.blur);
+  return p;
+}
+
 export interface ResolvedPhoto {
   path: string;
   width: number;
@@ -38,6 +64,8 @@ export interface ExportPage {
 }
 
 export type PhotoResolver = (id: string) => ResolvedPhoto;
+
+export type MatteResolver = (photoId: string) => string | null;
 
 /** SVG for a vector (shape/graphic) element sized to its canvas box. */
 function vectorElementSvg(
@@ -83,15 +111,17 @@ export async function renderPageJpeg(
   pageWpx: number,
   pageHpx: number,
   bleedPx: number,
+  resolveMatte?: MatteResolver,
 ): Promise<Buffer> {
   const canvasW = pageWpx + 2 * bleedPx;
   const canvasH = pageHpx + 2 * bleedPx;
 
   const bgHex = page.background?.color ?? "#ffffff";
-  const composites: Array<{ input: Buffer; left: number; top: number }> = [];
+  const composites: Array<sharp.OverlayOptions> = [];
 
   const elements = page.elements.slice().sort((a, b) => a.z - b.z);
   for (const el of elements) {
+    const blend = blendModeOf(el);
     if (el.type === "shape" || el.type === "graphic") {
       const w = Math.max(1, Math.round(el.width * pageWpx));
       const h = Math.max(1, Math.round(el.height * pageHpx));
@@ -107,20 +137,30 @@ export async function renderPageJpeg(
         input: buf,
         left: Math.round(bleedPx + el.x * pageWpx),
         top: Math.round(bleedPx + el.y * pageHpx),
+        ...(blend ? { blend: blend as sharp.OverlayOptions["blend"] } : {}),
       });
       continue;
     }
     if (el.type !== "image" || !el.photoId) continue;
     const photo = resolvePhoto(el.photoId);
+    const maskKind = (el.style as { mask?: { kind?: string } | null } | null)?.mask?.kind;
+    const mattePath = maskKind === "alpha" && resolveMatte ? resolveMatte(el.photoId) : null;
 
     let pipeline = sharp(photo.path).rotate();
+    pipeline = applyImageFilters(
+      pipeline,
+      (el.style as { filters?: Record<string, number> } | null)?.filters,
+    );
     const hasCrop = !!el.crop;
+    let cropPx: { left: number; top: number; width: number; height: number } | null = null;
     if (el.crop) {
-      const left = Math.round(el.crop.x * photo.width);
-      const top = Math.round(el.crop.y * photo.height);
-      const width = Math.max(1, Math.round(el.crop.width * photo.width));
-      const height = Math.max(1, Math.round(el.crop.height * photo.height));
-      pipeline = pipeline.extract({ left, top, width, height });
+      cropPx = {
+        left: Math.round(el.crop.x * photo.width),
+        top: Math.round(el.crop.y * photo.height),
+        width: Math.max(1, Math.round(el.crop.width * photo.width)),
+        height: Math.max(1, Math.round(el.crop.height * photo.height)),
+      };
+      pipeline = pipeline.extract(cropPx);
     }
     if (el.rotation) {
       pipeline = pipeline.rotate(el.rotation);
@@ -147,11 +187,28 @@ export async function renderPageJpeg(
 
     // With an explicit crop the aspect already matches, so fill exactly. Without a crop,
     // cover (center-crop to fill) prevents distortion.
-    const buf = await pipeline
+    let buf = await pipeline
       .resize(boxW, boxH, { fit: hasCrop ? "fill" : "cover" })
       .jpeg({ quality: 95 })
       .toBuffer();
-    composites.push({ input: buf, left: Math.round(left), top: Math.round(top) });
+
+    // Subject cutout: apply the alpha matte (same crop as the photo) so only the
+    // subject composites onto the page — graphics can sit behind the person.
+    if (mattePath) {
+      let mattePipeline = sharp(mattePath);
+      if (cropPx) mattePipeline = mattePipeline.extract(cropPx);
+      const matte = await mattePipeline.resize(boxW, boxH, { fit: "fill" }).png().toBuffer();
+      buf = await sharp(buf)
+        .composite([{ input: matte, blend: "dest-in" }])
+        .png()
+        .toBuffer();
+    }
+    composites.push({
+      input: buf,
+      left: Math.round(left),
+      top: Math.round(top),
+      ...(blend ? { blend: blend as sharp.OverlayOptions["blend"] } : {}),
+    });
   }
 
   // Base canvas: pattern (SVG raster) when a pattern is set, plain fill otherwise.
@@ -180,16 +237,18 @@ export async function renderSpreadJpegs(
   pageWpx: number,
   pageHpx: number,
   bleedPx: number,
+  resolveMatte?: MatteResolver,
 ): Promise<[Buffer, Buffer]> {
   const spreadWpx = 2 * pageWpx;
   const canvasW = spreadWpx + 2 * bleedPx;
   const canvasH = pageHpx + 2 * bleedPx;
 
   const bgHex = page.background?.color ?? "#ffffff";
-  const composites: Array<{ input: Buffer; left: number; top: number }> = [];
+  const composites: Array<sharp.OverlayOptions> = [];
 
   const elements = page.elements.slice().sort((a, b) => a.z - b.z);
   for (const el of elements) {
+    const blend = blendModeOf(el);
     if (el.type === "shape" || el.type === "graphic") {
       const w = Math.max(1, Math.round(el.width * spreadWpx));
       const h = Math.max(1, Math.round(el.height * pageHpx));
@@ -205,19 +264,30 @@ export async function renderSpreadJpegs(
         input: buf,
         left: Math.round(bleedPx + el.x * spreadWpx),
         top: Math.round(bleedPx + el.y * pageHpx),
+        ...(blend ? { blend: blend as sharp.OverlayOptions["blend"] } : {}),
       });
       continue;
     }
     if (el.type !== "image" || !el.photoId) continue;
     const photo = resolvePhoto(el.photoId);
+    const maskKind = (el.style as { mask?: { kind?: string } | null } | null)?.mask?.kind;
+    const mattePath = maskKind === "alpha" && resolveMatte ? resolveMatte(el.photoId) : null;
 
     let pipeline = sharp(photo.path).rotate();
+    pipeline = applyImageFilters(
+      pipeline,
+      (el.style as { filters?: Record<string, number> } | null)?.filters,
+    );
+    const hasCrop = !!el.crop;
+    let cropPx: { left: number; top: number; width: number; height: number } | null = null;
     if (el.crop) {
-      const left = Math.round(el.crop.x * photo.width);
-      const top = Math.round(el.crop.y * photo.height);
-      const width = Math.max(1, Math.round(el.crop.width * photo.width));
-      const height = Math.max(1, Math.round(el.crop.height * photo.height));
-      pipeline = pipeline.extract({ left, top, width, height });
+      cropPx = {
+        left: Math.round(el.crop.x * photo.width),
+        top: Math.round(el.crop.y * photo.height),
+        width: Math.max(1, Math.round(el.crop.width * photo.width)),
+        height: Math.max(1, Math.round(el.crop.height * photo.height)),
+      };
+      pipeline = pipeline.extract(cropPx);
     }
     if (el.rotation) {
       pipeline = pipeline.rotate(el.rotation);
@@ -239,11 +309,26 @@ export async function renderSpreadJpegs(
     }
     if (el.y + el.height >= 0.999) boxH += bleedPx;
 
-    const buf = await pipeline
-      .resize(boxW, boxH, { fit: el.crop ? "fill" : "cover" })
+    let buf = await pipeline
+      .resize(boxW, boxH, { fit: hasCrop ? "fill" : "cover" })
       .jpeg({ quality: 95 })
       .toBuffer();
-    composites.push({ input: buf, left: Math.round(left), top: Math.round(top) });
+
+    if (mattePath) {
+      let mattePipeline = sharp(mattePath);
+      if (cropPx) mattePipeline = mattePipeline.extract(cropPx);
+      const matte = await mattePipeline.resize(boxW, boxH, { fit: "fill" }).png().toBuffer();
+      buf = await sharp(buf)
+        .composite([{ input: matte, blend: "dest-in" }])
+        .png()
+        .toBuffer();
+    }
+    composites.push({
+      input: buf,
+      left: Math.round(left),
+      top: Math.round(top),
+      ...(blend ? { blend: blend as sharp.OverlayOptions["blend"] } : {}),
+    });
   }
 
   const patternSvg = backgroundCanvasSvg(page.background?.pattern ?? null, bgHex, canvasW, canvasH);
@@ -287,6 +372,7 @@ export async function writeLabPackage(
   outDir: string,
   albumName: string,
   resolveFont?: (family: string) => Uint8Array | null,
+  resolveMatte?: MatteResolver,
 ): Promise<string> {
   mkdirSync(outDir, { recursive: true });
   mkdirSync(join(outDir, "pages"), { recursive: true });
@@ -300,6 +386,7 @@ export async function writeLabPackage(
     bleedMm,
     undefined,
     resolveFont,
+    resolveMatte,
   );
   writeFileSync(join(outDir, `${albumName}.pdf`), pdf);
 
@@ -312,11 +399,11 @@ export async function writeLabPackage(
   for (const page of pages) {
     pageNo++;
     if (isSpreadLayout(page.layoutKey)) {
-      const [left, right] = await renderSpreadJpegs(page, resolvePhoto, pageWpx, pageHpx, bleedPx);
+      const [left, right] = await renderSpreadJpegs(page, resolvePhoto, pageWpx, pageHpx, bleedPx, resolveMatte);
       writeFileSync(join(outDir, "pages", `page-${String(pageNo).padStart(3, "0")}-left.jpg`), left);
       writeFileSync(join(outDir, "pages", `page-${String(pageNo).padStart(3, "0")}-right.jpg`), right);
     } else {
-      const jpeg = await renderPageJpeg(page, resolvePhoto, pageWpx, pageHpx, bleedPx);
+      const jpeg = await renderPageJpeg(page, resolvePhoto, pageWpx, pageHpx, bleedPx, resolveMatte);
       writeFileSync(join(outDir, "pages", `page-${String(pageNo).padStart(3, "0")}.jpg`), jpeg);
     }
   }
@@ -350,6 +437,7 @@ export async function buildPdf(
   bleedMm = 3,
   watermark?: string,
   resolveFont?: (family: string) => Uint8Array | null,
+  resolveMatte?: MatteResolver,
 ): Promise<Uint8Array> {
   const pxPerMm = dpi / MM_PER_INCH;
   const pageWpx = Math.round(widthMm * pxPerMm);
@@ -388,7 +476,7 @@ export async function buildPdf(
 
   for (const page of pages) {
     if (isSpreadLayout(page.layoutKey)) {
-      const [leftJpeg, rightJpeg] = await renderSpreadJpegs(page, resolvePhoto, pageWpx, pageHpx, bleedPx);
+      const [leftJpeg, rightJpeg] = await renderSpreadJpegs(page, resolvePhoto, pageWpx, pageHpx, bleedPx, resolveMatte);
       for (const half of ["left", "right"] as const) {
         const isRight = half === "right";
         const pdfPage = await addPdfPage(isRight ? rightJpeg : leftJpeg, isRight ? bleedMm * PT_PER_MM : 0);
@@ -407,7 +495,7 @@ export async function buildPdf(
         if (watermark) drawWatermark(pdfPage, defaultFont, watermark, mediaWmm, mediaHmm);
       }
     } else {
-      const jpeg = await renderPageJpeg(page, resolvePhoto, pageWpx, pageHpx, bleedPx);
+      const jpeg = await renderPageJpeg(page, resolvePhoto, pageWpx, pageHpx, bleedPx, resolveMatte);
       const pdfPage = await addPdfPage(jpeg, 0);
       await drawTextElements(
         doc,

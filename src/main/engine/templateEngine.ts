@@ -20,6 +20,7 @@ export function chooseLayout(
   remainingPhotos: number,
   history: string[],
   rng: Rng,
+  opts?: { preferSpread?: boolean },
 ): Layout {
   const layouts = resolveLayouts(family);
 
@@ -27,6 +28,12 @@ export function chooseLayout(
   if (pool.length === 0) {
     const smallest = layouts.reduce((a, b) => (a[0].slots.length <= b[0].slots.length ? a : b));
     pool = [smallest];
+  }
+
+  // New event beat → open with a dramatic spread when the family has one.
+  if (opts?.preferSpread) {
+    const spreads = pool.filter(([l]) => isSpreadLayout(l.key));
+    if (spreads.length > 0) pool = spreads;
   }
 
   if (pool.length > 1 && history.length > 0) {

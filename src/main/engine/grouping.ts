@@ -26,6 +26,28 @@ export function segmentByTime(
   return segments;
 }
 
+export interface Beat {
+  /** Index in the time-ordered array where a new beat (event segment) begins. */
+  index: number;
+  /** Gap in seconds to the previous photo. */
+  gapSeconds: number;
+}
+
+/** Find event boundaries in a time-ordered photo list: consecutive shots with a
+ *  capture gap larger than `gapSeconds` start a new beat (e.g. a Mehndi → Baraat
+ *  transition in a multi-day wedding). */
+export function timeBeats(ordered: PhotoRecord[], gapSeconds = 1800): Beat[] {
+  const beats: Beat[] = [];
+  for (let i = 1; i < ordered.length; i++) {
+    const prev = ordered[i - 1].takenAt;
+    const cur = ordered[i].takenAt;
+    if (prev != null && cur != null && cur - prev > gapSeconds) {
+      beats.push({ index: i, gapSeconds: cur - prev });
+    }
+  }
+  return beats;
+}
+
 export function findDuplicatePairs(
   photos: PhotoRecord[],
   threshold = 8,

@@ -16,7 +16,6 @@ export interface GraphicDef {
 }
 
 export const GRAPHICS: GraphicDef[] = [
-[
   {
     "id": "corner_filigree",
     "name": "Ornate corner",
@@ -1262,7 +1261,6 @@ export const GRAPHICS: GraphicDef[] = [
     ]
   }
 ]
-] as unknown as GraphicDef[];;;
 
 
 
@@ -1286,6 +1284,38 @@ export interface GraphicStyle {
 export function findGraphic(id: string | null | undefined): GraphicDef | undefined {
   if (!id) return undefined;
   return GRAPHICS.find((g) => g.id === id);
+}
+
+/** Data URI preview of a graphic (elements panel, thumbnails). */
+export function graphicPreviewUri(id: string, color = "#6366f1", width = 96): string {
+  const g = findGraphic(id);
+  if (!g) return "";
+  const height = Math.round(width * (g.h / g.w));
+  const svg = graphicSvg(id, color, width, height, 1, Math.max(1, Math.round(width / 60)));
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+/** Category for the elements panel. */
+export function graphicCategory(id: string): string {
+  if (id.startsWith("corner") || id.startsWith("medallion") || id.startsWith("mandala") || id.startsWith("monogram") || id.startsWith("ring") || id.startsWith("sparkle") || id.startsWith("star")) {
+    return "Ornaments";
+  }
+  if (id.startsWith("wreath") || id.startsWith("leaf") || id.startsWith("vines") || id.startsWith("heart")) {
+    return "Botanical";
+  }
+  if (id.startsWith("frame") || id.startsWith("arch")) {
+    return "Frames";
+  }
+  if (id.startsWith("divider") || id.startsWith("waves")) {
+    return "Dividers";
+  }
+  if (id === "lantern" || id === "peacock" || id === "paisley") {
+    return "Indian";
+  }
+  if (id.startsWith("swash") || id.startsWith("flourish") || id.startsWith("ribbon") || id.startsWith("banner")) {
+    return "Typography";
+  }
+  return "Ornaments";
 }
 
 /** SVG markup for a graphic element (used by the export rasterizer). */

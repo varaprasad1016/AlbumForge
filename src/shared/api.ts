@@ -249,6 +249,24 @@ export interface DesignPageData {
   elements: PageUpdate["elements"];
 }
 
+export interface DesignSuggestion {
+  background: { color: string; pattern: string | null };
+  accent: string;
+  ornament: {
+    graphicId: string;
+    color: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    opacity: number;
+  } | null;
+  titleFont: string;
+  bodyFont: string;
+  palette: { hex: string; weight: number }[];
+  rationale: string;
+}
+
 export interface GenerateInput {
   projectId: string;
   templateId: string;
@@ -317,6 +335,7 @@ export interface AlbumForgeApi {
     geo(projectId: string): Promise<GeoPoint[]>;
     setSelected(photoId: string, selected: boolean): Promise<void>;
     remove(photoId: string): Promise<void>;
+    segment(photoId: string): Promise<{ ok: boolean; cached?: boolean; error?: string }>;
     onImportProgress(cb: (p: ImportProgress) => void): () => void;
   };
   groups: {
@@ -384,5 +403,8 @@ export interface AlbumForgeApi {
     save(name: string, page: DesignPageData): Promise<PageDesign>;
     get(id: string): Promise<DesignPageData | null>;
     remove(id: string): Promise<void>;
+  };
+  recommend: {
+    suggest(photoIds: string[], eventType: string): Promise<DesignSuggestion>;
   };
 }

@@ -2,12 +2,13 @@
 import { describe, expect, it } from "vitest";
 import { computeCrop } from "./cropping";
 import { generateAlbum } from "./generator";
-import { findDuplicatePairs, segmentByTime } from "./grouping";
+import { findDuplicatePairs, segmentByTime, timeBeats } from "./grouping";
 import { composePage } from "./layoutEngine";
 import { isSpreadLayout, LAYOUT_CATALOG } from "./layouts";
 import { hamming, isNearDuplicate } from "./scoring";
 import { selectDiverse } from "./selection";
 import { chooseLayout } from "./templateEngine";
+import { seededRandom } from "./rng";
 import { AlbumSpec, PageStyle, PhotoRecord, TemplateFamily } from "./types";
 
 function makePhotos(n: number, duplicateEvery?: number): PhotoRecord[] {
@@ -250,5 +251,49 @@ describe("spreads", () => {
     expect(result.pages[result.pages.length - 1].layoutKey).toBe("cover_back");
     const ids = result.pages.flatMap((p) => p.elements.filter((e) => e.type === "image").map((e) => e.photoId));
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+describe("time-gap beats (multi-day events)", () => {
+  const BEAT_FAMILY: TemplateFamily = {
+    key: "beats",
+    name: "Beats",
+    layouts: [
+      ["full_bleed", 1.0],
+      ["spread_hero", 1.0],
+    ],
+    style: { margin: 0.02, gutter: 0.03, bleed: 0, safeArea: 0.05 },
+    chronological: true,
+  };
+
+  it("detects event boundaries at large capture gaps", () => {
+    const photos = makePhotos(12);
+    photos[6].takenAt = (photos[5].takenAt ?? 0) + 7200;
+    photos[9].takenAt = (photos[8].takenAt ?? 0) + 4 * 3600;
+    expect(timeBeats(photos, 1800).map((b) => b.index)).toEqual([6, 9]);
+    expect(timeBeats(photos, 4 * 3600)).toEqual([]);
+  });
+
+  it("chooseLayout prefers a spread when asked", () => {
+    const rng = seededRandom("beat-test");
+    const layout = chooseLayout(BEAT_FAMILY, 50, [], rng, { preferSpread: true });
+    expect(isSpreadLayout(layout.key)).toBe(true);
+  });
+
+  it("generator opens the beat with a spread", () => {
+    const photos = makePhotos(20);
+    const base = photos[5].takenAt ?? 0;
+    for (let i = 6; i < photos.length; i++) {
+      photos[i].takenAt = base + 6 * 3600 + (i - 6) * 30;
+    }
+    const result = generateAlbum(photos, BEAT_FAMILY, { ...SPEC, pageCount: 20, beatGapSeconds: 1800 }, 1);
+    let consumed = 0;
+    let beatPage: (typeof result.pages)[number] | undefined;
+    for (const page of result.pages) {
+      if (consumed === 6) beatPage = page;
+      consumed += page.elements.filter((e) => e.type === "image").length;
+    }
+    expect(beatPage).toBeDefined();
+    expect(beatPage!.spread).toBe(true);
   });
 });

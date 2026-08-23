@@ -9,6 +9,8 @@ files:
 asarUnpack:
   - node_modules/sharp/**
   - node_modules/better-sqlite3/**
+  # Native ORT binding cannot load from asar (N-API .node binary).
+  - node_modules/onnxruntime-node/**
 extraResources:
   - from: resources/fonts
     to: fonts

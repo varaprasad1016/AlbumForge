@@ -34,6 +34,7 @@ const api: AlbumForgeApi = {
     geo: (projectId) => ipcRenderer.invoke("photos:geo", projectId),
     setSelected: (photoId, selected) => ipcRenderer.invoke("photos:setSelected", photoId, selected),
     remove: (photoId) => ipcRenderer.invoke("photos:remove", photoId),
+    segment: (photoId) => ipcRenderer.invoke("photos:segment", photoId),
     onImportProgress: (cb) => {
       const listener = (_e: unknown, p: ImportProgress) => cb(p);
       ipcRenderer.on("import:progress", listener);
@@ -92,6 +93,9 @@ const api: AlbumForgeApi = {
     save: (name, page) => ipcRenderer.invoke("designs:save", name, page),
     get: (id) => ipcRenderer.invoke("designs:get", id),
     remove: (id) => ipcRenderer.invoke("designs:remove", id),
+  },
+  recommend: {
+    suggest: (photoIds, eventType) => ipcRenderer.invoke("recommend:suggest", photoIds, eventType),
   },
 };
 
