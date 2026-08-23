@@ -721,7 +721,10 @@ export function registerIpc(ctx: IpcContext): void {
       );
       update.elements.forEach((el, i) => {
         insert.run(
-          newId(), albumId, pageId, el.type, el.z ?? i, el.x, el.y, el.width, el.height,
+          // Keep the client's element id stable across saves — regenerating ids
+          // here unmounts every Konva node on the next render (keys change) and
+          // breaks an in-flight drag right after inserting an element.
+          el.id ?? newId(), albumId, pageId, el.type, el.z ?? i, el.x, el.y, el.width, el.height,
           el.rotation, el.photoId, el.crop ? JSON.stringify(el.crop) : null,
           el.text ? JSON.stringify(el.text) : null, el.style ? JSON.stringify(el.style) : null,
         );

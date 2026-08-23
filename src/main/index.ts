@@ -110,9 +110,12 @@ app.whenReady().then(() => {
     return net.fetch(pathToFileURL(p).toString());
   });
 
-  // Serve downloaded stock assets (cached SVGs/PNGs) via `stock://<providerId>`.
+  // Serve downloaded stock assets (cached SVGs/PNGs) via `stock://asset/<providerId>`.
+  // (The renderer keeps the providerId in the path so its case survives URL parsing
+  //  — hostname lookup would lowercase it and break mixed-case Unsplash ids.)
   protocol.handle("stock", (request) => {
     const url = new URL(request.url);
+    // Host is a static `asset` segment; the providerId lives in the path.
     const providerId = decodeURIComponent(url.pathname.replace(/^\//, ""));
     const r = db
       .prepare("SELECT local_path FROM stock_assets WHERE provider_id = ?")

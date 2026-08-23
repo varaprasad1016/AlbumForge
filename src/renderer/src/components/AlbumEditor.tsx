@@ -267,7 +267,7 @@ export default function AlbumEditor({
   const bgColor = bg.color ?? "#ffffff";
   const bgPattern = bg.pattern ?? null;
   const patternImg = useLoadedImage(patternDataUri(bgPattern) ?? undefined);
-  const bgImg = useLoadedImage(bg.image?.stockId ? `stock://${bg.image.stockId}` : undefined);
+  const bgImg = useLoadedImage(bg.image?.stockId ? `stock://asset/${bg.image.stockId}` : undefined);
   const spread = page?.isSpread ?? false;
   const canvasW = spread ? PAGE_W * 2 : PAGE_W;
 
@@ -352,11 +352,16 @@ export default function AlbumEditor({
     const p = targetPages[pageIndex];
     if (!p) return;
     setSaving(true);
+    // Fingerprint the page right before saving. If the user edits it while the
+    // save is in flight (e.g. grabs the freshly-inserted element and drags it),
+    // we must NOT replace their live work with the server's stale snapshot.
+    const before = JSON.stringify(p.elements.map((e) => [e.id, e.x, e.y, e.width, e.height, e.rotation, e.crop]));
     try {
       const updated = await window.albumforge.albums.savePage(albumId, p.id, {
         layoutKey: p.layoutKey,
         background: p.background,
         elements: p.elements.map((e) => ({
+          id: e.id,
           type: e.type,
           z: e.z,
           x: e.x,
@@ -370,7 +375,15 @@ export default function AlbumEditor({
           style: e.style,
         })),
       });
-      setPagesState((prev) => prev.map((x) => (x.id === p.id ? updated : x)));
+      setPagesState((prev) => {
+        const cur = prev.find((x) => x.id === p.id);
+        if (!cur) return prev;
+        const now = JSON.stringify(cur.elements.map((e) => [e.id, e.x, e.y, e.width, e.height, e.rotation, e.crop]));
+        // Local edits won the race — keep the live state; the autosave loop will
+        // persist them on the next quiet moment.
+        if (now !== before) return prev;
+        return prev.map((x) => (x.id === p.id ? updated : x));
+      });
       setSelectedIds(new Set());
       onPageUpdated(updated);
       toast("Page saved");
@@ -881,7 +894,8 @@ export default function AlbumEditor({
         await window.albumforge.designs.save(name.trim(), {
           layoutKey: page.layoutKey,
           background: page.background,
-          elements: page.elements.map((e) => ({
+          elements: page.elements.map((e, i) => ({
+            id: e.id ?? `design-${Date.now()}-${i}`,
             type: e.type,
             z: e.z,
             x: e.x,
@@ -918,7 +932,7 @@ export default function AlbumEditor({
     const updated = await window.albumforge.albums.savePage(albumId, page.id, {
       layoutKey: page.layoutKey,
       background: d.background,
-      elements: merged.map((e) => ({ ...e, z: e.z ?? 0 })),
+      elements: merged.map((e, i) => ({ ...e, id: e.id ?? `design-${Date.now()}-${i}`, z: e.z ?? 0 })),
     });
     setPagesState((prev) => prev.map((p) => (p.id === page.id ? updated : p)));
     setSelectedIds(new Set());
@@ -2388,7 +2402,7 @@ function ElementNode({
 
   if (el.type === "stock-photo") {
     const style = (el.style ?? {}) as { stockId?: string; opacity?: number };
-    const stockImg = useLoadedImage(style.stockId ? `stock://${style.stockId}` : undefined);
+    const stockImg = useLoadedImage(style.stockId ? `stock://asset/${style.stockId}` : undefined);
     return (
       <Group
         ref={nodeRef}

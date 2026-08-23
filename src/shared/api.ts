@@ -338,6 +338,7 @@ export interface PageUpdate {
   layoutKey?: string | null;
   background?: Record<string, unknown> | null;
   elements?: Array<{
+    id: string;
     type: AlbumElementType;
     z: number;
     x: number;
