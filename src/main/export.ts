@@ -676,12 +676,31 @@ async function drawTextElements(
       }
     }
 
-    const textStyle = (el.style ?? {}) as unknown as { fontSize?: number; color?: string };
+    const textStyle = (el.style ?? {}) as unknown as {
+      fontSize?: number;
+      color?: string;
+      align?: string;
+      lineHeight?: number;
+      letterSpacing?: number;
+    };
     const fontSize = textStyle.fontSize ?? 18;
     const color = textStyle.color ?? "#000000";
-    const x = (bleedMm + xNorm * widthMm) * PT_PER_MM;
+    const boxW = (el.width || 0.5) * widthMm * PT_PER_MM;
+    const align = textStyle.align ?? "left";
+    // pdf-lib drawText has no width/align option, so center/right-align manually.
+    const textW = font.widthOfTextAtSize(content, fontSize);
+    let x = (bleedMm + xNorm * widthMm) * PT_PER_MM;
+    if (align === "center") x += (boxW - textW) / 2;
+    else if (align === "right") x += boxW - textW;
     const y = pageHpt - (bleedMm + el.y * heightMm) * PT_PER_MM - fontSize;
-    pdfPage.drawText(content, { x, y, size: fontSize, font, color: hexToPdf(color) });
+    pdfPage.drawText(content, {
+      x,
+      y,
+      size: fontSize,
+      font,
+      color: hexToPdf(color),
+      lineHeight: (textStyle.lineHeight ?? 1.2) * fontSize,
+    });
   }
 }
 

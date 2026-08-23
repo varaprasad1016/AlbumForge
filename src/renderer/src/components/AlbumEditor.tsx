@@ -208,6 +208,9 @@ export default function AlbumEditor({
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [guides, setGuides] = useState<{ x?: number; y?: number }>({});
   const [cropModeId, setCropModeId] = useState<string | null>(null);
+  const [editingTextId, setEditingTextId] = useState<string | null>(null);
+  const [draftText, setDraftText] = useState("");
+  const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
   const stageRef = useRef<Konva.Stage>(null);
   const srcDimsRef = useRef<Record<string, { w: number; h: number }>>({});
   const liveRef = useRef<AlbumPage[]>([]);
@@ -334,6 +337,33 @@ export default function AlbumEditor({
     scheduleAutosave(next);
   }
 
+  /** Inline text editing: begin editing a text element on the canvas (no dialog). */
+  function beginTextEdit(el: AlbumElement) {
+    startLiveEdit();
+    setEditingTextId(el.id);
+    setSelectedIds(new Set([el.id]));
+    setDraftText((el.text as { content?: string } | null)?.content ?? "");
+    requestAnimationFrame(() => textAreaRef.current?.select());
+  }
+
+  /** Commit inline text edits (Enter / blur). */
+  function commitTextEdit() {
+    if (!editingTextId) return;
+    // Fold the live draft into history once and autosave.
+    endLiveEdit();
+    setEditingTextId(null);
+  }
+
+  /** Cancel inline text editing (Escape) — restore the pre-edit snapshot. */
+  function cancelTextEdit() {
+    if (!editingTextId) return;
+    const snap = liveSnapRef.current;
+    liveSnapRef.current = null;
+    liveDirtyRef.current = false;
+    if (snap) setPagesState(snap);
+    setEditingTextId(null);
+  }
+
   function undo() {
     if (!history.length) return;
     setFuture((f) => [pagesState, ...f]);
@@ -446,6 +476,7 @@ export default function AlbumEditor({
       ),
     );
     setSelectedIds(new Set());
+    setEditingTextId(null);
   }
 
   /** Free-form drag with optional Shift-to-snap. Stage coordinates (which
@@ -1116,14 +1147,14 @@ export default function AlbumEditor({
 
   useEffect(() => {
     if (trRef.current) {
-      const nodes = cropModeId
+      const nodes = cropModeId || editingTextId
         ? []
         : [...selectedIds]
             .map((id) => nodeRefs.current[id])
             .filter((n): n is Konva.Group => !!n);
       trRef.current.nodes(nodes);
     }
-  }, [selectedIds, elements, pageIndex, cropModeId]);
+  }, [selectedIds, elements, pageIndex, cropModeId, editingTextId]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -1140,9 +1171,10 @@ export default function AlbumEditor({
       } else if (mod && e.key.toLowerCase() === "y") {
         e.preventDefault();
         redo();
-      } else if (e.key === "Escape" && cropModeId) {
+      } else if (e.key === "Escape" && (cropModeId || editingTextId)) {
         e.preventDefault();
-        setCropModeId(null);
+        if (editingTextId) cancelTextEdit();
+        else setCropModeId(null);
       } else if (mod && e.key === "]") {
         e.preventDefault();
         if (selected) layerOp(selected.id, e.shiftKey ? "front" : "forward");
@@ -1334,7 +1366,7 @@ export default function AlbumEditor({
           onDragOver={(e) => e.preventDefault()}
           onDrop={handleCanvasDrop}
         >
-          <div className="shadow-2xl shadow-slate-900/20">
+          <div className="relative shadow-2xl shadow-slate-900/20">
         <Stage
           ref={stageRef}
           width={canvasW + 80}
@@ -1493,20 +1525,83 @@ export default function AlbumEditor({
                   onCropDragStart={() => startLiveEdit()}
                   onCropPan={(crop) => updateElementLive(el.id, { crop })}
                   onCropDragEnd={() => endLiveEdit()}
-                  onEditTextRequest={(el) => {
-                    const content = (el.text as { content?: string } | null)?.content ?? "";
-                    setPrompt({
-                      title: "Edit text",
-                      initial: content,
-                      onConfirm: (v) => updateElement(el.id, { text: { content: v } }),
-                    });
-                  }}
+                  onEditTextRequest={(el) => beginTextEdit(el)}
+                  editingText={editingTextId === el.id}
                 />
               );
             })}
             <Transformer ref={trRef} rotateEnabled anchorSize={8} />
           </Layer>
         </Stage>
+
+          {/* Inline text editor — double-click a text element and type directly on the canvas. */}
+          {editingTextId && (() => {
+            const tEl = elements.find((e) => e.id === editingTextId);
+            if (!tEl || tEl.type !== "text") return null;
+            const tstyle = (tEl.style ?? {}) as {
+              fontSize?: number;
+              fontFamily?: string;
+              color?: string;
+              align?: string;
+              fontWeight?: string;
+              fontStyle?: string;
+              letterSpacing?: number;
+              lineHeight?: number;
+            };
+            const elX = PAGE_X + tEl.x * canvasW;
+            const elY = PAGE_Y + tEl.y * PAGE_H;
+            const elW = Math.max(24, tEl.width * canvasW);
+            const elH = Math.max(20, tEl.height * PAGE_H);
+            const fz = (tstyle.fontSize ?? 28) * zoom;
+            return (
+              <textarea
+                ref={textAreaRef}
+                value={draftText}
+                autoFocus
+                spellCheck={false}
+                onChange={(e) => {
+                  setDraftText(e.target.value);
+                  updateElementLive(tEl.id, { text: { content: e.target.value } });
+                }}
+                onBlur={() => commitTextEdit()}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    e.stopPropagation();
+                    cancelTextEdit();
+                  } else if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    (e.target as HTMLTextAreaElement).blur();
+                  }
+                }}
+                style={{
+                  position: "absolute",
+                  left: pan.x + elX * zoom,
+                  top: pan.y + elY * zoom,
+                  width: elW * zoom,
+                  minHeight: elH * zoom,
+                  fontFamily: tstyle.fontFamily || "sans-serif",
+                  fontSize: fz,
+                  lineHeight: tstyle.lineHeight ?? 1.2,
+                  letterSpacing: tstyle.letterSpacing ?? 0,
+                  color: tstyle.color ?? "#000",
+                  textAlign: (tstyle.align as "left" | "center" | "right") ?? "left",
+                  fontWeight: tstyle.fontWeight ?? "normal",
+                  fontStyle: tstyle.fontStyle ?? "normal",
+                  background: "rgba(255,255,255,0.6)",
+                  outline: "2px solid #6366f1",
+                  border: "none",
+                  resize: "none",
+                  overflow: "hidden",
+                  padding: 0,
+                  margin: 0,
+                  borderRadius: 2,
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                  zIndex: 20,
+                }}
+              />
+            );
+          })()}
           </div>
         </section>
 
@@ -1918,6 +2013,52 @@ export default function AlbumEditor({
                       />
                     </div>
                   </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        const st = selected.style ?? {};
+                        const w = (st as { fontWeight?: string }).fontWeight === "bold" ? "normal" : "bold";
+                        updateElement(selected.id, { style: { ...st, fontWeight: w } });
+                      }}
+                      className={`flex-1 rounded-lg border px-2 py-1.5 text-xs font-semibold ${
+                        (selected.style as { fontWeight?: string } | null)?.fontWeight === "bold"
+                          ? "border-indigo-400 bg-indigo-50 text-indigo-700"
+                          : "border-slate-200 hover:border-slate-300"
+                      }`}
+                      title="Bold"
+                    >
+                      B
+                    </button>
+                    <button
+                      onClick={() => {
+                        const st = selected.style ?? {};
+                        const fs = (st as { fontStyle?: string }).fontStyle === "italic" ? "normal" : "italic";
+                        updateElement(selected.id, { style: { ...st, fontStyle: fs } });
+                      }}
+                      className={`flex-1 rounded-lg border px-2 py-1.5 text-xs italic ${
+                        (selected.style as { fontStyle?: string } | null)?.fontStyle === "italic"
+                          ? "border-indigo-400 bg-indigo-50 text-indigo-700"
+                          : "border-slate-200 hover:border-slate-300"
+                      }`}
+                      title="Italic"
+                    >
+                      I
+                    </button>
+                    <select
+                      value={(selected.style as { align?: string } | null)?.align ?? "left"}
+                      onChange={(e) =>
+                        updateElement(selected.id, {
+                          style: { ...(selected.style ?? {}), align: e.target.value },
+                        })
+                      }
+                      className="input flex-1 !px-2"
+                      title="Align"
+                    >
+                      <option value="left">Left</option>
+                      <option value="center">Center</option>
+                      <option value="right">Right</option>
+                    </select>
+                  </div>
                 </div>
               )}
               {selected.type === "shape" && (
@@ -2229,6 +2370,7 @@ function ElementNode({
   pageH,
   selected,
   cropMode = false,
+  editingText = false,
   nodeRef,
   onSelect,
   onDragMove,
@@ -2248,6 +2390,7 @@ function ElementNode({
   pageH: number;
   selected: boolean;
   cropMode?: boolean;
+  editingText?: boolean;
   nodeRef: (n: Konva.Group | null) => void;
   onSelect: (e: Konva.KonvaEventObject<MouseEvent>) => void;
   onDragMove?: (node: Konva.Group, evt: Konva.KonvaEventObject<DragEvent>) => void;
@@ -2429,6 +2572,16 @@ function ElementNode({
 
   if (el.type === "text" || el.type === "background") {
     const content = (el.text as { content?: string } | null)?.content ?? "";
+    const tstyle = (el.style ?? {}) as {
+      fontSize?: number;
+      fontFamily?: string;
+      color?: string;
+      align?: string;
+      fontWeight?: string;
+      fontStyle?: string;
+      letterSpacing?: number;
+      lineHeight?: number;
+    };
     return (
       <Group
         ref={nodeRef}
@@ -2436,7 +2589,7 @@ function ElementNode({
         x={x}
         y={y}
         globalCompositeOperation={blendMode as GlobalCompositeOperation | undefined}
-        draggable
+        draggable={!editingText}
         onClick={onSelect}
         onTap={onSelect}
         onDblClick={() => onEditTextRequest(el)}
@@ -2448,9 +2601,18 @@ function ElementNode({
         ) : (
           <KText
             text={content}
-            fontSize={(el.style as { fontSize?: number } | null)?.fontSize ?? 28}
-            fontFamily={(el.style as { fontFamily?: string } | null)?.fontFamily || "sans-serif"}
-            fill={(el.style as { color?: string } | null)?.color ?? "#000"}
+            fontSize={tstyle.fontSize ?? 28}
+            fontFamily={tstyle.fontFamily || "sans-serif"}
+            fill={tstyle.color ?? "#000"}
+            align={(tstyle.align as "left" | "center" | "right") ?? "left"}
+            fontStyle={tstyle.fontStyle ?? "normal"}
+            fontWeight={tstyle.fontWeight ?? "normal"}
+            letterSpacing={tstyle.letterSpacing ?? 0}
+            lineHeight={tstyle.lineHeight ?? 1.2}
+            width={w}
+            wrap="word"
+            opacity={editingText ? 0 : 1}
+            listening={!editingText}
           />
         )}
       </Group>
