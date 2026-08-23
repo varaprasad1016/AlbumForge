@@ -1,0 +1,108 @@
+name: Build & publish on push
+
+# Every push to `main` becomes an update: bump the patch version, build the
+# desktop installers, and publish a GitHub release so the in-app updater
+# (electron-updater → latest.yml / latest-mac.yml) always finds something newer.
+#
+# The version bump is committed back to `main` with "[skip ci]" so it never
+# re-triggers this workflow (no bump loops). The Android APK stays on `m-*`
+# tags (android.yml) — it can't self-update, so every-push builds would just
+# burn CI minutes.
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      bumped: ${{ steps.bump.outputs.bumped }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip automated version-bump commits
+        id: skip
+        run: |
+          if git log -1 --pretty=%B | grep -q '\[skip ci\]'; then
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skipped=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump patch version
+        id: bump
+        if: steps.skip.outputs.skipped == 'false'
+        run: |
+          npm version patch --no-git-tag-version
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "bumped=true" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push version bump
+        if: steps.skip.outputs.skipped == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "[skip ci] chore: bump version to v${{ steps.bump.outputs.version }}"
+          git push origin main
+
+  build:
+    needs: release
+    if: needs.release.outputs.bumped == 'true'
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            publish_files: |
+              dist/*.exe
+              dist/*.blockmap
+              dist/latest.yml
+          - os: macos-latest
+            publish_files: |
+              dist/*.dmg
+              dist/*.zip
+              dist/latest-mac.yml
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # The trigger commit predates the bump pushed by the `release` job —
+      # build from the bumped tip so the packaged version matches the release tag.
+      - name: Check out the bumped commit
+        run: git fetch origin main && git reset --hard origin/main
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build and package (Windows NSIS installer)
+        if: runner.os == 'Windows'
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npm run dist
+
+      - name: Build and package (macOS app, ad-hoc signed)
+        if: runner.os == 'macOS'
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          npm run build
+          npx electron-builder --mac --publish never
+
+      - name: Publish to GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.release.outputs.version }}
+          name: v${{ needs.release.outputs.version }}
+          files: ${{ matrix.publish_files }}
