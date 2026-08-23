@@ -1,13 +1,14 @@
 name: Build & publish on push
 
 # Every push to `main` becomes an update: bump the patch version, build the
-# desktop installers, and publish a GitHub release so the in-app updater
-# (electron-updater → latest.yml / latest-mac.yml) always finds something newer.
+# desktop installers AND the Android APK, and publish releases so the in-app
+# updaters (electron-updater → latest.yml / latest-mac.yml, and the mobile
+# checker → latest m-* release) always find something newer.
 #
 # The version bump is committed back to `main` with "[skip ci]" so it never
-# re-triggers this workflow (no bump loops). The Android APK stays on `m-*`
-# tags (android.yml) — it can't self-update, so every-push builds would just
-# burn CI minutes.
+# re-triggers this workflow (no bump loops). Android publishes under an m-*
+# prerelease tag matching the desktop version; the android.yml workflow on
+# explicit m-* tags still works for on-demand builds.
 
 on:
   push:
@@ -42,6 +43,16 @@ jobs:
         run: |
           npm version patch --no-git-tag-version
           VERSION="$(node -p "require('./package.json').version")"
+          # Keep the mobile app on the same version so the Android updater
+          # (which compares against the latest m-* release) tracks desktop.
+          node -e "
+            const fs = require('fs');
+            for (const f of ['mobile/package.json', 'mobile/package-lock.json']) {
+              const p = JSON.parse(fs.readFileSync(f, 'utf8'));
+              p.version = process.argv[1];
+              fs.writeFileSync(f, JSON.stringify(p, null, 2) + '\n');
+            }
+          " "$VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "bumped=true" >> "$GITHUB_OUTPUT"
 
@@ -50,7 +61,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package.json package-lock.json
+          git add package.json package-lock.json mobile/package.json mobile/package-lock.json
           git commit -m "[skip ci] chore: bump version to v${{ steps.bump.outputs.version }}"
           git push origin main
 
@@ -108,3 +119,90 @@ jobs:
           tag_name: v${{ needs.release.outputs.version }}
           name: v${{ needs.release.outputs.version }}
           files: ${{ matrix.publish_files }}
+
+  android:
+    # Every push also ships an Android APK under an m-* prerelease so the
+    # mobile updater (which checks the latest m-* release) tracks desktop.
+    needs: release
+    if: needs.release.outputs.bumped == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Check out the bumped commit
+        run: git fetch origin main && git reset --hard origin/main
+
+      - name: Install web dependencies
+        working-directory: mobile
+        run: npm install
+
+      - name: Build web app
+        working-directory: mobile
+        run: npm run build
+
+      - name: Sync web + plugins
+        working-directory: mobile
+        run: npx cap sync android
+
+      - name: Build debug APK (fixed demo keystore)
+        working-directory: mobile/android
+        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon -PafVersionName=${{ needs.release.outputs.version }}
+
+      - name: Publish APK to m-* release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -e
+          APK=$(ls mobile/android/app/build/outputs/apk/debug/*.apk | head -n1)
+          APK_NAME=$(basename "$APK")
+          TAG="m-${{ needs.release.outputs.version }}"
+          REPO="$GITHUB_REPOSITORY"
+          BASE="https://api.github.com/repos/$REPO"
+          AUTH="Authorization: Bearer $GH_TOKEN"
+          UA="User-Agent: albumforge-ci"
+          LOG=""
+
+          REL=$(curl -s -H "$AUTH" -H "$UA" "$BASE/releases/tags/$TAG" || true)
+          if ! echo "$REL" | jq -e '.id' >/dev/null 2>&1; then
+            LOG="${LOG}get-release: $(echo "$REL" | head -c 300)\n"
+            REL=$(curl -s -X POST -H "$AUTH" -H "$UA" -H "Content-Type: application/json" \
+              -d "{\"tag_name\":\"$TAG\",\"name\":\"AlbumForge $TAG\",\"prerelease\":true}" "$BASE/releases")
+          fi
+          REL_ID=$(echo "$REL" | jq -r '.id // empty')
+          if [ -z "$REL_ID" ]; then
+            echo "Could not find or create release for $TAG: $(echo "$REL" | head -c 500)"
+            exit 1
+          fi
+          LOG="${LOG}release-id: $REL_ID\n"
+
+          for AID in $(echo "$REL" | jq -r --arg n "$APK_NAME" '.assets[]? | select(.name == $n) | .id'); do
+            curl -s -X DELETE -H "$AUTH" -H "$UA" "$BASE/releases/assets/$AID" -o /dev/null || true
+          done
+
+          UPLOAD_URL=$(echo "$REL" | jq -r '.upload_url' | sed 's/{?name,label}//')
+          RESP=$(curl -s -X POST -H "$AUTH" -H "$UA" -H "Content-Type: application/vnd.android.package-archive" \
+            --data-binary @"$APK" "$UPLOAD_URL?name=$APK_NAME")
+          LOG="${LOG}upload: $(echo "$RESP" | head -c 400)\n"
+
+          if ! echo "$RESP" | grep -q '"browser_download_url"'; then
+            BODY="publish log:\n$LOG"
+            curl -s -X PATCH -H "$AUTH" -H "$UA" -H "Content-Type: application/json" \
+              -d "{\"body\":\"$BODY\"}" "$BASE/releases/$REL_ID" -o /dev/null || true
+            echo "APK upload failed: $(echo "$RESP" | head -c 400)"
+            exit 1
+          fi
+          curl -s -X PATCH -H "$AUTH" -H "$UA" -H "Content-Type: application/json" \
+            -d "{\"body\":\"published $APK_NAME\"}" "$BASE/releases/$REL_ID" -o /dev/null || true
+          echo "Published $APK_NAME to release $TAG"
