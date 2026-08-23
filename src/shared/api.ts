@@ -81,9 +81,11 @@ export interface CropRect {
   height: number;
 }
 
+export type AlbumElementType = "image" | "text" | "background" | "shape" | "graphic" | "stock-vector" | "stock-photo";
+
 export interface AlbumElement {
   id: string;
-  type: "image" | "text" | "background" | "shape" | "graphic";
+  type: AlbumElementType;
   z: number;
   x: number;
   y: number;
@@ -249,6 +251,61 @@ export interface DesignPageData {
   elements: PageUpdate["elements"];
 }
 
+/* ---- Module 7: external stock asset search & ingestion ---- */
+
+export interface StockVectorGroup {
+  color: string;
+  paths: string[];
+}
+
+/** Parsed, recolourable vector data extracted from an external SVG.
+ *  `groups` are bucketed by original fill colour so each colour becomes an
+ *  independent recolor slot in the editor. Coordinates are in the SVG's own
+ *  viewBox units; renderers scale to the element box. */
+export interface StockVectorData {
+  width: number;
+  height: number;
+  groups: StockVectorGroup[];
+}
+
+export interface StockSearchResult {
+  providerId: string; // e.g. "pixabay-123456" / "freepik-123456" / "unsplash-abc"
+  provider: "pixabay" | "freepik" | "unsplash";
+  title: string;
+  kind: "vector" | "bitmap";
+  previewUrl: string;
+  sourceUrl: string;
+  width: number | null;
+  height: number | null;
+  author: string | null;
+  isPremium: boolean;
+  attributionRequired: boolean;
+}
+
+export interface StockDownloadInput {
+  sourceUrl: string;
+  previewUrl?: string;
+  title?: string;
+  kind?: "vector" | "bitmap";
+  author?: string | null;
+  attributionRequired?: boolean;
+  width?: number | null;
+  height?: number | null;
+}
+
+export interface StockDownloadResult {
+  providerId: string;
+  kind: "vector" | "bitmap";
+  width: number | null;
+  height: number | null;
+  vector: StockVectorData | null;
+  title: string;
+  author: string | null;
+  attributionRequired: boolean;
+  fromCache: boolean;
+  error?: string;
+}
+
 export interface DesignSuggestion {
   background: { color: string; pattern: string | null };
   accent: string;
@@ -281,7 +338,7 @@ export interface PageUpdate {
   layoutKey?: string | null;
   background?: Record<string, unknown> | null;
   elements?: Array<{
-    type: "image" | "text" | "background" | "shape" | "graphic";
+    type: AlbumElementType;
     z: number;
     x: number;
     y: number;
@@ -406,5 +463,18 @@ export interface AlbumForgeApi {
   };
   recommend: {
     suggest(photoIds: string[], eventType: string): Promise<DesignSuggestion>;
+  };
+  stock: {
+    configured(): Promise<boolean>;
+    provider(): Promise<string>;
+    setProvider(provider: string): Promise<boolean>;
+    setApiKey(provider: string, key: string): Promise<boolean>;
+    search(
+      term: string,
+      kind: "vector" | "bitmap",
+    ): Promise<{ items: StockSearchResult[]; cached: boolean }>;
+    download(providerId: string, input?: StockDownloadInput): Promise<StockDownloadResult>;
+    parseSvg(svg: string): Promise<StockVectorData>;
+    recent(limit?: number): Promise<string[]>;
   };
 }

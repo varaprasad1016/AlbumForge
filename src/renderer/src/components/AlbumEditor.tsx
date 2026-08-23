@@ -14,11 +14,12 @@ import {
   Transformer,
 } from "react-konva";
 import Konva from "konva";
-import type { AlbumElement, AlbumPage, CropRect, DesignAsset, PageDesign, PageSize } from "@shared/api";
+import type { AlbumElement, AlbumPage, CropRect, DesignAsset, PageDesign, PageSize, StockVectorData } from "@shared/api";
 import { PAGE_PATTERNS, patternDataUri } from "@shared/patterns";
 import { findGraphic, graphicCategory, graphicPreviewUri, GRAPHICS, type ShapeKind } from "@shared/designs";
 import { coverCrop, panCropRect, reorderLayer, zoomCropRect, type LayerOp } from "../lib/layoutMath";
 import PhotoPicker from "./PhotoPicker";
+import StockPanel, { type StockDragPayload } from "./StockPanel";
 import PromptModal from "./PromptModal";
 import { toast } from "./Toast";
 import { useFonts } from "./useFonts";
@@ -91,6 +92,8 @@ function layerLabel(el: AlbumElement): string {
   }
   if (el.type === "shape") return `Shape: ${(el.style as { shape?: string } | null)?.shape ?? "rect"}`;
   if (el.type === "graphic") return "Graphic";
+  if (el.type === "stock-vector") return "Stock vector";
+  if (el.type === "stock-photo") return "Stock image";
   return el.type;
 }
 
@@ -187,6 +190,13 @@ export default function AlbumEditor({
   const [assets, setAssets] = useState<DesignAsset[]>([]);
   const [designs, setDesigns] = useState<PageDesign[]>([]);
   const [panelOpen, setPanelOpen] = useState(true);
+  const [stockOpen, setStockOpen] = useState(false);
+  const [stockBusy, setStockBusy] = useState(false);
+  const [showGuides, setShowGuides] = useState<{ safe: boolean; trim: boolean; bleed: boolean }>({
+    safe: true,
+    trim: true,
+    bleed: false,
+  });
   const [elemQuery, setElemQuery] = useState("");
   const [elemCat, setElemCat] = useState("All");
   const [zoom, setZoom] = useState(1);
@@ -244,10 +254,15 @@ export default function AlbumEditor({
   const selectedFilters = (selected?.style as { filters?: Record<string, number> } | null)?.filters ?? {};
   const selectedBlend = (selected?.style as { blendMode?: string } | null)?.blendMode ?? "";
   const selectedMask = (selected?.style as { mask?: { kind?: string } | null } | null)?.mask?.kind === "alpha";
-  const bg = (page?.background as { color?: string; pattern?: string } | null) ?? {};
+  const bg = (page?.background as {
+    color?: string;
+    pattern?: string;
+    image?: { stockId?: string; title?: string; author?: string | null; attributionRequired?: boolean };
+  } | null) ?? {};
   const bgColor = bg.color ?? "#ffffff";
   const bgPattern = bg.pattern ?? null;
   const patternImg = useLoadedImage(patternDataUri(bgPattern) ?? undefined);
+  const bgImg = useLoadedImage(bg.image?.stockId ? `stock://${bg.image.stockId}` : undefined);
   const spread = page?.isSpread ?? false;
   const canvasW = spread ? PAGE_W * 2 : PAGE_W;
 
@@ -548,9 +563,134 @@ export default function AlbumEditor({
     void persist(mutateElements([...elements, el]));
   }
 
+  /** Module 7: place a stock asset (from the Elements panel) on the page.
+   *  `center` is the drop point in page-normalised coordinates; the element is
+   *  sized from the asset's aspect and centred there. SVGs arrive from the main
+   *  process already parsed into recolourable path groups. */
+  async function addStockAsset(payload: StockDragPayload, center?: { x: number; y: number }) {
+    setStockBusy(true);
+    try {
+      const res = await window.albumforge.stock.download(payload.providerId, {
+        sourceUrl: payload.sourceUrl,
+        title: payload.title,
+        kind: payload.kind,
+        author: payload.author,
+        attributionRequired: payload.attributionRequired,
+        width: payload.width,
+        height: payload.height,
+      });
+      if (res.error) {
+        toast(res.error);
+        return;
+      }
+      const isVector = res.kind === "vector" && !!res.vector;
+      const natW = isVector ? res.vector!.width : res.width;
+      const natH = isVector ? res.vector!.height : res.height;
+      const aspect = natW && natH ? natW / natH : 1;
+      const h = 0.5;
+      const w = Math.min(0.92, Math.max(0.2, h * aspect));
+      const cx = center ? Math.min(Math.max(center.x, 0), 1) : 0.5;
+      const cy = center ? Math.min(Math.max(center.y, 0), 1) : 0.5;
+      const x = Math.min(Math.max(cx - w / 2, 0), 1 - w);
+      const y = Math.min(Math.max(cy - h / 2, 0), 1 - h);
+      const maxZ = elements.reduce((m, e) => Math.max(m, e.z), -1);
+      const style: Record<string, unknown> = isVector
+        ? {
+            stockId: res.providerId,
+            title: res.title,
+            author: res.author,
+            attributionRequired: res.attributionRequired,
+            width: res.vector!.width,
+            height: res.vector!.height,
+            opacity: 1,
+            vector: res.vector,
+          }
+        : {
+            stockId: res.providerId,
+            title: res.title,
+            author: res.author,
+            attributionRequired: res.attributionRequired,
+            width: res.width,
+            height: res.height,
+            opacity: 1,
+          };
+      const el: AlbumElement = {
+        id: `new-${Date.now()}`,
+        type: isVector ? "stock-vector" : "stock-photo",
+        z: maxZ + 1,
+        x,
+        y,
+        width: w,
+        height: h,
+        rotation: 0,
+        photoId: null,
+        crop: null,
+        text: null,
+        style,
+      };
+      void persist(mutateElements([...elements, el]));
+    } catch (e) {
+      toast(`Could not add asset: ${String(e)}`);
+    } finally {
+      setStockBusy(false);
+    }
+  }
+
+  /** Place a parsed SVG (from the local assets library) as a recolourable vector element. */
+  function addParsedVectorElement(vector: StockVectorData, title: string) {
+    const aspect = vector.width / Math.max(1, vector.height);
+    const h = 0.5;
+    const w = Math.min(0.92, Math.max(0.2, h * aspect));
+    const maxZ = elements.reduce((m, e) => Math.max(m, e.z), -1);
+    const el: AlbumElement = {
+      id: `new-${Date.now()}`,
+      type: "stock-vector",
+      z: maxZ + 1,
+      x: (1 - w) / 2,
+      y: (1 - h) / 2,
+      width: w,
+      height: h,
+      rotation: 0,
+      photoId: null,
+      crop: null,
+      text: null,
+      style: {
+        stockId: `imported-${Date.now()}`,
+        title,
+        author: null,
+        attributionRequired: false,
+        width: vector.width,
+        height: vector.height,
+        opacity: 1,
+        vector,
+      },
+    };
+    void persist(mutateElements([...elements, el]));
+  }
+
   /** Smart Frame drag-and-drop: photo dropped onto a frame → replace with cover-crop; empty canvas → add. */
   function handleCanvasDrop(e: React.DragEvent) {
     e.preventDefault();
+    const rawStock = e.dataTransfer.getData("application/x-albumforge-stock");
+    if (rawStock) {
+      let data: StockDragPayload;
+      try {
+        data = JSON.parse(rawStock) as StockDragPayload;
+      } catch {
+        return;
+      }
+      const stage = stageRef.current;
+      if (!stage) return;
+      const rect = stage.container().getBoundingClientRect();
+      const inv = stage.getAbsoluteTransform().copy().invert();
+      const pos = inv.point({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+      if (data.mode === "background") {
+        void applyStockBackground(data);
+      } else {
+        void addStockAsset(data, { x: (pos.x - 40) / canvasW, y: (pos.y - 40) / PAGE_H });
+      }
+      return;
+    }
     const raw = e.dataTransfer.getData("application/x-albumforge-photo");
     if (!raw) return;
     let data: { id: string; w?: number | null; h?: number | null };
@@ -669,7 +809,7 @@ export default function AlbumEditor({
     void persist(mutateElements([...elements, el]));
   }
 
-  function addGraphic(graphicId: string) {
+  async function addGraphic(graphicId: string) {
     const maxZ = elements.reduce((m, e) => Math.max(m, e.z), -1);
     let w = 0.4;
     let h = 0.4;
@@ -677,6 +817,19 @@ export default function AlbumEditor({
     if (graphicId.startsWith("asset:")) {
       const asset = assets.find((a) => a.id === graphicId.slice(6));
       if (!asset) return;
+      // Imported SVGs get parsed into recolourable vector paths (the same pipeline
+      // the stock panel uses), so every colour is independently editable.
+      if (asset.kind === "svg") {
+        try {
+          const comma = asset.dataUri.indexOf(",");
+          const svgText = decodeURIComponent(asset.dataUri.slice(comma + 1));
+          const vector = await window.albumforge.stock.parseSvg(svgText);
+          addParsedVectorElement(vector, asset.name);
+        } catch {
+          toast("Could not parse this SVG into recolourable paths.");
+        }
+        return;
+      }
       style = { graphicId, assetUri: asset.dataUri, color: null, opacity: 1 };
     } else {
       const g = findGraphic(graphicId);
@@ -777,13 +930,60 @@ export default function AlbumEditor({
   }
 
   function setBackground(color: string) {
-    const p = { ...page, background: { color, pattern: bgPattern } };
+    const p = { ...page, background: { color, pattern: bgPattern, image: bg.image } };
     setPagesState((prev) => prev.map((x) => (x.id === p.id ? p : x)));
     void persist(pagesState.map((x) => (x.id === p.id ? p : x)));
   }
 
   function setPattern(patternId: string) {
-    const p = { ...page, background: { color: bgColor, pattern: patternId || null } };
+    const p = { ...page, background: { color: bgColor, pattern: patternId || null, image: bg.image } };
+    setPagesState((prev) => prev.map((x) => (x.id === p.id ? p : x)));
+    void persist(pagesState.map((x) => (x.id === p.id ? p : x)));
+  }
+
+  /** Apply a downloaded stock photo as the page background (cover-cropped, print-safe). */
+  async function applyStockBackground(payload: StockDragPayload) {
+    setStockBusy(true);
+    try {
+      const res = await window.albumforge.stock.download(payload.providerId, {
+        sourceUrl: payload.sourceUrl,
+        title: payload.title,
+        kind: payload.kind,
+        author: payload.author,
+        attributionRequired: payload.attributionRequired,
+        width: payload.width,
+        height: payload.height,
+      });
+      if (res.error) {
+        toast(res.error);
+        return;
+      }
+      const p = {
+        ...page,
+        background: {
+          color: bgColor,
+          pattern: bgPattern,
+          image: {
+            stockId: res.providerId,
+            title: res.title,
+            author: res.author,
+            attributionRequired: res.attributionRequired,
+          },
+        },
+      };
+      setPagesState((prev) => prev.map((x) => (x.id === p.id ? p : x)));
+      void persist(pagesState.map((x) => (x.id === p.id ? p : x)));
+      toast("Background applied — layer photos & ornaments on top");
+    } catch (e) {
+      toast(`Could not apply background: ${String(e)}`);
+    } finally {
+      setStockBusy(false);
+    }
+  }
+
+  function removeStockBackground() {
+    const { image: _drop, ...rest } = (page?.background ?? {}) as Record<string, unknown>;
+    const p = { ...page, background: rest };
     setPagesState((prev) => prev.map((x) => (x.id === p.id ? p : x)));
     void persist(pagesState.map((x) => (x.id === p.id ? p : x)));
   }
@@ -825,7 +1025,7 @@ export default function AlbumEditor({
           },
         ];
       }
-      const p = { ...page, background: { color: sugg.background.color, pattern: sugg.background.pattern } };
+      const p = { ...page, background: { color: sugg.background.color, pattern: sugg.background.pattern, image: bg.image } };
       commit(pagesState.map((x) => (x.id === p.id ? { ...p, elements: nextElements } : x)));
       toast(`Suggested: ${sugg.rationale}`);
     } catch {
@@ -937,6 +1137,10 @@ export default function AlbumEditor({
   if (!page) return null;
 
   const safeInset = canvasW * 0.05;
+  // Physical 3 mm bleed projected into canvas pixels, so the guide lands where
+  // print trim actually is relative to the bleed edge.
+  const pxPerUnit = PAGE_W / pageSize.width;
+  const bleedPx = (pageSize.unit === "in" ? 3 / 25.4 : 3) * pxPerUnit;
 
   return (
     <div className="flex flex-col gap-3">
@@ -1014,6 +1218,30 @@ export default function AlbumEditor({
           <button onClick={importAssets} className="btn-secondary !px-2.5 !py-1.5 text-xs" title="Import SVG or PNG graphics">
             Import…
           </button>
+
+          <button
+            onClick={() => setStockOpen((o) => !o)}
+            className={`btn-secondary !px-2.5 !py-1.5 text-xs ${stockOpen ? "!border-indigo-500 !bg-indigo-50 !text-indigo-600" : ""}`}
+            title="Search Freepik stock assets (vectors + PNGs)"
+          >
+            {stockBusy ? "Downloading…" : "Elements"}
+          </button>
+        </div>
+
+        <div className="flex items-center gap-1">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Guides</span>
+          {(["safe", "trim", "bleed"] as const).map((g) => (
+            <button
+              key={g}
+              onClick={() => setShowGuides((s) => ({ ...s, [g]: !s[g] }))}
+              className={`chip !px-2 !py-0.5 text-[10px] ${
+                showGuides[g] ? "!border-indigo-500 !bg-indigo-50 !text-indigo-600" : ""
+              }`}
+              title={`Toggle ${g} guide`}
+            >
+              {g}
+            </button>
+          ))}
         </div>
 
         <div className="ml-auto flex items-center gap-1.5">
@@ -1031,7 +1259,25 @@ export default function AlbumEditor({
 
       {/* Workspace */}
       <div className="flex h-[calc(100vh-150px)] gap-3">
-        <aside className="w-44 shrink-0 overflow-y-auto rounded-2xl border border-slate-200/60 bg-surface/70 p-2">
+        <aside
+          className={`${stockOpen ? "w-72" : "w-44"} shrink-0 overflow-y-auto rounded-2xl border border-slate-200/60 bg-surface/70 p-2 transition-all duration-150`}
+        >
+          <div className="mb-2 border-b border-slate-100 pb-2">
+            <button
+              onClick={() => setStockOpen((o) => !o)}
+              className="flex w-full items-center justify-between px-1 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 hover:text-slate-600"
+            >
+              <span>Elements</span>
+              <span>{stockOpen ? "▾" : "▸"}</span>
+            </button>
+            {stockOpen && (
+              <div className="pt-1">
+                <StockPanel
+                  onAdd={(p, m) => (m === "background" ? void applyStockBackground(p) : void addStockAsset(p))}
+                />
+              </div>
+            )}
+          </div>
           <div className="flex items-center justify-between px-1 pb-2">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Pages</span>
             <button onClick={addPage} className="btn-ghost !px-1.5 !py-0.5 text-base" title="Add page">
@@ -1105,18 +1351,58 @@ export default function AlbumEditor({
                 listening={false}
               />
             )}
-            <Line
-              points={[
-                40 + safeInset, 40 + safeInset,
-                40 + canvasW - safeInset, 40 + safeInset,
-                40 + canvasW - safeInset, 40 + PAGE_H - safeInset,
-                40 + safeInset, 40 + PAGE_H - safeInset,
-                40 + safeInset, 40 + safeInset,
-              ]}
-              stroke="#5b5bd6"
-              dash={[6, 4]}
-              listening={false}
-            />
+            {bgImg && (() => {
+              // object-fit: cover — centre-crop the stock background to the page.
+              const sw = bgImg.naturalWidth;
+              const sh = bgImg.naturalHeight;
+              const na = canvasW / PAGE_H;
+              const sa = sw / sh;
+              const crop = sa > na
+                ? { x: (sw - sh * na) / 2, y: 0, width: sh * na, height: sh }
+                : { x: 0, y: (sh - sw / na) / 2, width: sw, height: sw / na };
+              return <KImage image={bgImg} x={40} y={40} width={canvasW} height={PAGE_H} crop={crop} listening={false} />;
+            })()}
+            {showGuides.bleed && (
+              <Line
+                points={[
+                  40 - bleedPx, 40 - bleedPx,
+                  40 + canvasW + bleedPx, 40 - bleedPx,
+                  40 + canvasW + bleedPx, 40 + PAGE_H + bleedPx,
+                  40 - bleedPx, 40 + PAGE_H + bleedPx,
+                  40 - bleedPx, 40 - bleedPx,
+                ]}
+                stroke="#f43f5e"
+                strokeWidth={1.5}
+                dash={[6, 4]}
+                listening={false}
+              />
+            )}
+            {showGuides.trim && (
+              <Rect
+                x={40}
+                y={40}
+                width={canvasW}
+                height={PAGE_H}
+                stroke="#0ea5e9"
+                strokeWidth={1.5}
+                dash={[8, 6]}
+                listening={false}
+              />
+            )}
+            {showGuides.safe && (
+              <Line
+                points={[
+                  40 + safeInset, 40 + safeInset,
+                  40 + canvasW - safeInset, 40 + safeInset,
+                  40 + canvasW - safeInset, 40 + PAGE_H - safeInset,
+                  40 + safeInset, 40 + PAGE_H - safeInset,
+                  40 + safeInset, 40 + safeInset,
+                ]}
+                stroke="#5b5bd6"
+                dash={[6, 4]}
+                listening={false}
+              />
+            )}
             {spread && (
               <>
                 <Line
@@ -1305,6 +1591,18 @@ export default function AlbumEditor({
                 ))}
               </select>
             </div>
+            {bg.image?.stockId && (
+              <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-slate-100 bg-slate-50 px-2 py-1.5">
+                <span className="truncate text-[11px] text-slate-500" title={bg.image.title}>
+                  📷 Stock background
+                  {bg.image.title ? ` — ${bg.image.title}` : ""}
+                  {bg.image.author ? ` · by ${bg.image.author}` : ""}
+                </span>
+                <button onClick={removeStockBackground} className="shrink-0 text-[11px] font-medium text-red-500 hover:underline">
+                  Remove
+                </button>
+              </div>
+            )}
             <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">
               <label className="field-label">AI suggest (event type)</label>
               <select value={eventType} onChange={(e) => setEventType(e.target.value)} className="input">
@@ -1694,6 +1992,102 @@ export default function AlbumEditor({
                   </div>
                 </div>
               )}
+              {selected.type === "stock-vector" &&
+                (() => {
+                  const s = (selected.style ?? {}) as {
+                    vector?: StockVectorData;
+                    opacity?: number;
+                    title?: string;
+                    author?: string | null;
+                    attributionRequired?: boolean;
+                  };
+                  const v = s.vector;
+                  return (
+                    <div className="space-y-3">
+                      {v && v.groups.length > 0 && (
+                        <div>
+                          <label className="field-label">Recolor — one slot per original colour</label>
+                          <div className="space-y-1.5">
+                            {v.groups.map((g, i) => (
+                              <div key={i} className="flex items-center gap-2">
+                                <input
+                                  type="color"
+                                  value={g.color}
+                                  onChange={(e) =>
+                                    updateElement(selected.id, {
+                                      style: {
+                                        ...selected.style,
+                                        vector: {
+                                          ...v,
+                                          groups: v.groups.map((x, xi) =>
+                                            xi === i ? { ...x, color: e.target.value } : x,
+                                          ),
+                                        },
+                                      },
+                                    })
+                                  }
+                                  className="h-7 w-10 cursor-pointer rounded border border-slate-200"
+                                />
+                                <span className="text-[11px] text-slate-400">
+                                  {g.paths.length} path{g.paths.length > 1 ? "s" : ""}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      <div>
+                        <label className="field-label">Opacity</label>
+                        <input
+                          type="number"
+                          min={0.1}
+                          max={1}
+                          step={0.05}
+                          value={s.opacity ?? 1}
+                          onChange={(e) =>
+                            updateElement(selected.id, {
+                              style: { ...(selected.style ?? {}), opacity: Number(e.target.value) },
+                            })
+                          }
+                          className="input"
+                        />
+                      </div>
+                      {(s.title || s.author) && (
+                        <p className="text-[10px] leading-snug text-slate-400">
+                          {s.title}
+                          {s.author ? ` · by ${s.author}` : ""}
+                          {s.attributionRequired ? " · attribution required" : ""}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
+              {selected.type === "stock-photo" && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="field-label">Opacity</label>
+                    <input
+                      type="number"
+                      min={0.1}
+                      max={1}
+                      step={0.05}
+                      value={(selected.style as { opacity?: number } | null)?.opacity ?? 1}
+                      onChange={(e) =>
+                        updateElement(selected.id, {
+                          style: { ...(selected.style ?? {}), opacity: Number(e.target.value) },
+                        })
+                      }
+                      className="input"
+                    />
+                  </div>
+                  <p className="text-[10px] leading-snug text-slate-400">
+                    {(selected.style as { title?: string } | null)?.title ?? "Stock image"}
+                    {(selected.style as { author?: string | null } | null)?.author
+                      ? ` · by ${(selected.style as { author?: string | null } | null)?.author}`
+                      : ""}
+                  </p>
+                </div>
+              )}
             </section>
           )}
         </aside>
@@ -1944,6 +2338,66 @@ function ElementNode({
           </Group>
         )}
         {assetImg && <KImage image={assetImg} width={w} height={h} />}
+        {selected && <Rect width={w} height={h} stroke="#5b5bd6" strokeWidth={1} listening={false} />}
+      </Group>
+    );
+  }
+
+  if (el.type === "stock-vector") {
+    const style = (el.style ?? {}) as { vector?: StockVectorData; opacity?: number };
+    const v = style.vector;
+    return (
+      <Group
+        ref={nodeRef}
+        id={el.id}
+        x={x}
+        y={y}
+        width={w}
+        height={h}
+        rotation={el.rotation}
+        opacity={style.opacity ?? 1}
+        globalCompositeOperation={blendMode as GlobalCompositeOperation | undefined}
+        draggable
+        onClick={onSelect}
+        onTap={onSelect}
+        onDragMove={(e) => onDragMove?.(e.target as Konva.Group)}
+        onDragEnd={onDragEnd}
+        onTransformEnd={onTransformEnd}
+      >
+        {v && v.groups.length > 0 && (
+          <Group scaleX={w / v.width} scaleY={h / v.height}>
+            {v.groups.map((grp, gi) =>
+              grp.paths.map((d, i) => <Path key={`${gi}-${i}`} data={d} fill={grp.color} lineJoin="round" />),
+            )}
+          </Group>
+        )}
+        {selected && <Rect width={w} height={h} stroke="#5b5bd6" strokeWidth={1} listening={false} />}
+      </Group>
+    );
+  }
+
+  if (el.type === "stock-photo") {
+    const style = (el.style ?? {}) as { stockId?: string; opacity?: number };
+    const stockImg = useLoadedImage(style.stockId ? `stock://${style.stockId}` : undefined);
+    return (
+      <Group
+        ref={nodeRef}
+        id={el.id}
+        x={x}
+        y={y}
+        width={w}
+        height={h}
+        rotation={el.rotation}
+        opacity={style.opacity ?? 1}
+        globalCompositeOperation={blendMode as GlobalCompositeOperation | undefined}
+        draggable
+        onClick={onSelect}
+        onTap={onSelect}
+        onDragMove={(e) => onDragMove?.(e.target as Konva.Group)}
+        onDragEnd={onDragEnd}
+        onTransformEnd={onTransformEnd}
+      >
+        {stockImg ? <KImage image={stockImg} width={w} height={h} /> : <Rect width={w} height={h} fill="#e5e7eb" />}
         {selected && <Rect width={w} height={h} stroke="#5b5bd6" strokeWidth={1} listening={false} />}
       </Group>
     );

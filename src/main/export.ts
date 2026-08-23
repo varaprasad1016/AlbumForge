@@ -7,6 +7,7 @@ import { join } from "path";
 import { isSpreadLayout } from "./engine/layouts";
 import { backgroundCanvasSvg } from "../shared/patterns";
 import { graphicSvg, shapeSvg, type GraphicStyle, type ShapeStyle } from "../shared/designs";
+import type { StockVectorData } from "@shared/api";
 
 const MM_PER_INCH = 25.4;
 const PT_PER_MM = 72 / MM_PER_INCH;
@@ -59,13 +60,86 @@ export interface ExportElement {
 
 export interface ExportPage {
   layoutKey: string | null;
-  background: { color?: string; pattern?: string } | null;
+  background: { color?: string; pattern?: string; image?: { stockId?: string } } | null;
   elements: ExportElement[];
 }
 
 export type PhotoResolver = (id: string) => ResolvedPhoto;
 
 export type MatteResolver = (photoId: string) => string | null;
+
+export type StockResolver = (providerId: string) => { path: string } | null;
+
+/** SVG for a recolourable stock-vector element. Rotation is baked around the
+ *  element centre, matching the editor's group rotation. */
+function stockVectorSvg(data: StockVectorData, width: number, height: number, opacity: number, rotationDeg = 0): string {
+  const w = Math.max(1, Math.round(width));
+  const h = Math.max(1, Math.round(height));
+  const rot = rotationDeg ? ` transform="rotate(${rotationDeg} ${w / 2} ${h / 2})"` : "";
+  const paths = data.groups
+    .map((g) => g.paths.map((d) => `<path d="${d}" fill="${g.color}"/>`).join(""))
+    .join("");
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${data.width} ${data.height}" opacity="${opacity}"${rot}>${paths}</svg>`;
+}
+
+/** Cover-cropped raster for a stock page background (e.g. an Unsplash texture). */
+async function backgroundImageBuffer(
+  page: ExportPage,
+  canvasW: number,
+  canvasH: number,
+  resolveStock?: StockResolver,
+): Promise<Buffer | null> {
+  const img = (page.background as { image?: { stockId?: string } } | null)?.image;
+  if (!img?.stockId || !resolveStock) return null;
+  const rec = resolveStock(img.stockId);
+  if (!rec) return null;
+  try {
+    return await sharp(rec.path)
+      .rotate()
+      .resize(canvasW, canvasH, { fit: "cover" })
+      .jpeg({ quality: 95 })
+      .toBuffer();
+  } catch {
+    return null;
+  }
+}
+
+/** Rasterized composite for a stock element (recolorable vector or cached bitmap). */
+async function stockElementComposite(
+  el: ExportElement,
+  pageWpx: number,
+  pageHpx: number,
+  bleedPx: number,
+  resolveStock?: StockResolver,
+): Promise<sharp.OverlayOptions | null> {
+  const blend = blendModeOf(el);
+  const w = Math.max(1, Math.round(el.width * pageWpx));
+  const h = Math.max(1, Math.round(el.height * pageHpx));
+  const left = Math.round(bleedPx + el.x * pageWpx);
+  const top = Math.round(bleedPx + el.y * pageHpx);
+  const withBlend = (input: Buffer): sharp.OverlayOptions => ({
+    input,
+    left,
+    top,
+    ...(blend ? { blend: blend as sharp.OverlayOptions["blend"] } : {}),
+  });
+
+  if (el.type === "stock-vector") {
+    const style = (el.style ?? {}) as { vector?: StockVectorData; opacity?: number };
+    const v = style.vector;
+    if (!v?.groups?.length) return null;
+    const svg = stockVectorSvg(v, w, h, style.opacity ?? 1, el.rotation);
+    return withBlend(await sharp(Buffer.from(svg)).png().toBuffer());
+  }
+
+  const style = (el.style ?? {}) as { stockId?: string; filters?: Record<string, number> };
+  const rec = style.stockId && resolveStock ? resolveStock(style.stockId) : null;
+  if (!rec) return null;
+  let pipeline = sharp(rec.path);
+  pipeline = applyImageFilters(pipeline, style.filters);
+  if (el.rotation) pipeline = pipeline.rotate(el.rotation);
+  return withBlend(await pipeline.resize(w, h, { fit: "fill" }).png().toBuffer());
+}
 
 /** SVG for a vector (shape/graphic) element sized to its canvas box. */
 function vectorElementSvg(
@@ -112,6 +186,7 @@ export async function renderPageJpeg(
   pageHpx: number,
   bleedPx: number,
   resolveMatte?: MatteResolver,
+  resolveStock?: StockResolver,
 ): Promise<Buffer> {
   const canvasW = pageWpx + 2 * bleedPx;
   const canvasH = pageHpx + 2 * bleedPx;
@@ -139,6 +214,11 @@ export async function renderPageJpeg(
         top: Math.round(bleedPx + el.y * pageHpx),
         ...(blend ? { blend: blend as sharp.OverlayOptions["blend"] } : {}),
       });
+      continue;
+    }
+    if (el.type === "stock-vector" || el.type === "stock-photo") {
+      const comp = await stockElementComposite(el, pageWpx, pageHpx, bleedPx, resolveStock);
+      if (comp) composites.push(comp);
       continue;
     }
     if (el.type !== "image" || !el.photoId) continue;
@@ -223,8 +303,11 @@ export async function renderPageJpeg(
           background: hexToRgb(bgHex),
         },
       });
+  // Stock photo background sits above the colour/pattern base, below all elements.
+  const bgBuf = await backgroundImageBuffer(page, canvasW, canvasH, resolveStock);
+  const all = bgBuf ? [{ input: bgBuf, left: 0, top: 0 }, ...composites] : composites;
   return base
-    .composite(composites)
+    .composite(all)
     .jpeg({ quality: 95 })
     .toBuffer();
 }
@@ -238,6 +321,7 @@ export async function renderSpreadJpegs(
   pageHpx: number,
   bleedPx: number,
   resolveMatte?: MatteResolver,
+  resolveStock?: StockResolver,
 ): Promise<[Buffer, Buffer]> {
   const spreadWpx = 2 * pageWpx;
   const canvasW = spreadWpx + 2 * bleedPx;
@@ -266,6 +350,11 @@ export async function renderSpreadJpegs(
         top: Math.round(bleedPx + el.y * pageHpx),
         ...(blend ? { blend: blend as sharp.OverlayOptions["blend"] } : {}),
       });
+      continue;
+    }
+    if (el.type === "stock-vector" || el.type === "stock-photo") {
+      const comp = await stockElementComposite(el, spreadWpx, pageHpx, bleedPx, resolveStock);
+      if (comp) composites.push(comp);
       continue;
     }
     if (el.type !== "image" || !el.photoId) continue;
@@ -342,8 +431,10 @@ export async function renderSpreadJpegs(
           background: hexToRgb(bgHex),
         },
       });
+  const bgBuf = await backgroundImageBuffer(page, canvasW, canvasH, resolveStock);
+  const all = bgBuf ? [{ input: bgBuf, left: 0, top: 0 }, ...composites] : composites;
   const canvas = await base
-    .composite(composites)
+    .composite(all)
     .jpeg({ quality: 95 })
     .toBuffer();
 
@@ -373,6 +464,7 @@ export async function writeLabPackage(
   albumName: string,
   resolveFont?: (family: string) => Uint8Array | null,
   resolveMatte?: MatteResolver,
+  resolveStock?: StockResolver,
 ): Promise<string> {
   mkdirSync(outDir, { recursive: true });
   mkdirSync(join(outDir, "pages"), { recursive: true });
@@ -387,6 +479,7 @@ export async function writeLabPackage(
     undefined,
     resolveFont,
     resolveMatte,
+    resolveStock,
   );
   writeFileSync(join(outDir, `${albumName}.pdf`), pdf);
 
@@ -399,11 +492,11 @@ export async function writeLabPackage(
   for (const page of pages) {
     pageNo++;
     if (isSpreadLayout(page.layoutKey)) {
-      const [left, right] = await renderSpreadJpegs(page, resolvePhoto, pageWpx, pageHpx, bleedPx, resolveMatte);
+      const [left, right] = await renderSpreadJpegs(page, resolvePhoto, pageWpx, pageHpx, bleedPx, resolveMatte, resolveStock);
       writeFileSync(join(outDir, "pages", `page-${String(pageNo).padStart(3, "0")}-left.jpg`), left);
       writeFileSync(join(outDir, "pages", `page-${String(pageNo).padStart(3, "0")}-right.jpg`), right);
     } else {
-      const jpeg = await renderPageJpeg(page, resolvePhoto, pageWpx, pageHpx, bleedPx, resolveMatte);
+      const jpeg = await renderPageJpeg(page, resolvePhoto, pageWpx, pageHpx, bleedPx, resolveMatte, resolveStock);
       writeFileSync(join(outDir, "pages", `page-${String(pageNo).padStart(3, "0")}.jpg`), jpeg);
     }
   }
@@ -438,6 +531,7 @@ export async function buildPdf(
   watermark?: string,
   resolveFont?: (family: string) => Uint8Array | null,
   resolveMatte?: MatteResolver,
+  resolveStock?: StockResolver,
 ): Promise<Uint8Array> {
   const pxPerMm = dpi / MM_PER_INCH;
   const pageWpx = Math.round(widthMm * pxPerMm);
@@ -476,7 +570,7 @@ export async function buildPdf(
 
   for (const page of pages) {
     if (isSpreadLayout(page.layoutKey)) {
-      const [leftJpeg, rightJpeg] = await renderSpreadJpegs(page, resolvePhoto, pageWpx, pageHpx, bleedPx, resolveMatte);
+      const [leftJpeg, rightJpeg] = await renderSpreadJpegs(page, resolvePhoto, pageWpx, pageHpx, bleedPx, resolveMatte, resolveStock);
       for (const half of ["left", "right"] as const) {
         const isRight = half === "right";
         const pdfPage = await addPdfPage(isRight ? rightJpeg : leftJpeg, isRight ? bleedMm * PT_PER_MM : 0);
@@ -495,7 +589,7 @@ export async function buildPdf(
         if (watermark) drawWatermark(pdfPage, defaultFont, watermark, mediaWmm, mediaHmm);
       }
     } else {
-      const jpeg = await renderPageJpeg(page, resolvePhoto, pageWpx, pageHpx, bleedPx, resolveMatte);
+      const jpeg = await renderPageJpeg(page, resolvePhoto, pageWpx, pageHpx, bleedPx, resolveMatte, resolveStock);
       const pdfPage = await addPdfPage(jpeg, 0);
       await drawTextElements(
         doc,

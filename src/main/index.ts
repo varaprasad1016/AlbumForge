@@ -46,6 +46,7 @@ function buildMenu(): void {
 protocol.registerSchemesAsPrivileged([
   { scheme: "media", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
   { scheme: "font", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+  { scheme: "stock", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
 ]);
 
 let db: DB;
@@ -107,6 +108,17 @@ app.whenReady().then(() => {
     }
     if (!p) return new Response("not found", { status: 404 });
     return net.fetch(pathToFileURL(p).toString());
+  });
+
+  // Serve downloaded stock assets (cached SVGs/PNGs) via `stock://<providerId>`.
+  protocol.handle("stock", (request) => {
+    const url = new URL(request.url);
+    const providerId = decodeURIComponent(url.pathname.replace(/^\//, ""));
+    const r = db
+      .prepare("SELECT local_path FROM stock_assets WHERE provider_id = ?")
+      .get(providerId) as { local_path: string } | undefined;
+    if (!r) return new Response("not found", { status: 404 });
+    return net.fetch(pathToFileURL(r.local_path).toString());
   });
 
   // Serve bundled/user font files to the renderer via `font://font/<family>`.

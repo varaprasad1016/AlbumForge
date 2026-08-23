@@ -5,7 +5,7 @@ import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
 import { basename, extname, join } from "path";
 import { DB, newId, now } from "./db";
 import { analyzeImage, extractGps, extractTimestamp, generateThumbnails, imageInfo } from "./imaging";
-import { buildPdf, ExportPage, MatteResolver, PhotoResolver, writeLabPackage } from "./export";
+import { buildPdf, ExportPage, MatteResolver, PhotoResolver, StockResolver, writeLabPackage } from "./export";
 import { buildProofGallery, importFeedback, photoNotes } from "./proofing";
 import { albumById, generateAndPersist, pageAspect, photoRecordById, photoRecordsFor } from "./generate";
 import { composePage } from "./engine/layoutEngine";
@@ -14,6 +14,7 @@ import { segmentByTime } from "./engine/grouping";
 import { listFonts, readFont } from "./fonts";
 import { hasMatte, mattePath, segmentPhoto } from "./segment";
 import { suggestForPhotos } from "./recommend";
+import { parseSvg, StockService } from "./stock";
 import type {
   Album,
   AlbumElement,
@@ -25,6 +26,7 @@ import type {
   Photo,
   PhotoGroup,
   Project,
+  StockDownloadInput,
   TemplateDetail,
   TemplateSummary,
 } from "@shared/api";
@@ -320,6 +322,21 @@ export function registerIpc(ctx: IpcContext): void {
     }
     return suggestForPhotos(paths, eventType, listFonts().map((f) => f.family));
   });
+
+  // ---- Module 7: external stock asset search (Freepik proxy) ----------------
+  const stockService = new StockService({ db, cacheDir, dataDir });
+  ipcMain.handle("stock:configured", () => stockService.isConfigured());
+  ipcMain.handle("stock:provider", () => stockService.provider());
+  ipcMain.handle("stock:setProvider", (_e, p: string) => stockService.setProvider(p));
+  ipcMain.handle("stock:setApiKey", (_e, provider: string, key: string) => stockService.setApiKey(provider, key));
+  ipcMain.handle("stock:recent", (_e, limit?: number) => stockService.recent(limit));
+  ipcMain.handle("stock:search", (_e, term: string, kind: "vector" | "bitmap") =>
+    stockService.search(term, kind),
+  );
+  ipcMain.handle("stock:download", (_e, providerId: string, input?: StockDownloadInput) =>
+    stockService.download(providerId, input),
+  );
+  ipcMain.handle("stock:parseSvg", (_e, svg: string) => parseSvg(svg));
 
   // ---- Subject segmentation (on-device background removal) -----------------
   ipcMain.handle("photos:segment", async (_e, photoId: string) => {
@@ -877,6 +894,13 @@ export function registerIpc(ctx: IpcContext): void {
         return m?.matte_path ?? null;
       };
 
+      const resolveStock: StockResolver = (providerId) => {
+        const r = db
+          .prepare("SELECT local_path FROM stock_assets WHERE provider_id = ?")
+          .get(providerId) as { local_path: string } | undefined;
+        return r ? { path: r.local_path } : null;
+      };
+
       const [widthMm, heightMm] = [
         album.pageSize.unit === "in" ? album.pageSize.width * 25.4 : album.pageSize.width,
         album.pageSize.unit === "in" ? album.pageSize.height * 25.4 : album.pageSize.height,
@@ -917,6 +941,7 @@ export function registerIpc(ctx: IpcContext): void {
           album.name,
           (family) => readFont(family),
           resolveMatte,
+          resolveStock,
         );
         db.prepare("UPDATE exports SET status = 'completed', file_path = ? WHERE id = ?").run(outPath, exportId);
         return;
@@ -932,6 +957,7 @@ export function registerIpc(ctx: IpcContext): void {
         watermark,
         (family) => readFont(family),
         resolveMatte,
+        resolveStock,
       );
       const outPath = targetPath ?? join(dataDir, "exports", `album-${album.id}.pdf`);
       mkdirSync(join(dataDir, "exports"), { recursive: true });

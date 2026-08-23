@@ -178,6 +178,26 @@ CREATE TABLE IF NOT EXISTS designs (
   layout_json TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS stock_search_cache (
+  cache_key TEXT PRIMARY KEY,
+  payload TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS stock_assets (
+  provider_id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  local_path TEXT NOT NULL,
+  source_url TEXT,
+  preview_url TEXT,
+  title TEXT,
+  author TEXT,
+  license TEXT,
+  width INTEGER,
+  height INTEGER,
+  created_at TEXT NOT NULL
+);
 `;
 
 export function initDatabase(dbPath: string): DB {

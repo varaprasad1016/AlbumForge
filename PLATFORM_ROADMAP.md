@@ -138,6 +138,38 @@ Remaining in Module 2:
 
 ### Phase G — Cloud (product decision) — *see §4 before scheduling*
 
+### Module 7 — Dynamic creative asset integration — *done this pass*
+
+- **External search & ingestion pipeline:** `src/main/stock.ts` is provider-
+  switchable. **Pixabay is the default** (free, no attribution — search via
+  `/api/`, transparent-PNG originals via the CDN `largeImageURL`); **Unsplash**
+  supplies texture backgrounds (Client-ID auth, raw URLs clamped to 2400px,
+  attribution flagged); **Freepik is retained** behind the same interface for
+  later paid usage (Bearer-token proxy to `api.freepik.com/v1/resources`). Keys
+  live in the main process only (env vars or `userData/stock-config.json`),
+  never in the renderer; the active provider is persisted and switchable from
+  the panel. Search results are cached in SQLite (`stock_search_cache`, 7-day
+  TTL) plus an in-memory LRU; popular terms persist for quick re-search.
+- **Elements sidebar:** `StockPanel.tsx` (search, Vectors/PNG filter, draggable
+  thumbnails, click-to-place). Drag payload carries only preview metadata — the
+  hi-res fetch happens in main at drop time.
+- **Content-sniffed ingestion:** downloaded files are sniffed — real SVG → parsed
+  into recolourable vector paths (`parseSvg`, svgson + svgpath, transform
+  flattening, colour bucketing); PNG/other → transparent bitmap layer. Local
+  copies live in `cache/stock/` (DB `stock_assets`), served to the renderer via
+  `stock://` and resolved at export via `StockResolver` (albums stay offline-safe).
+- **Element types:** `stock-vector` (per-part colour recolor slots in the
+  inspector) and `stock-photo`, rendered in Konva and rasterized in `export.ts`
+  with parity (blend modes + filters included). Imported SVG assets now also flow
+  through `parseSvg` → editable vectors.
+- **Licensing note:** Pixabay (default) is free and attribution-free; its vector
+  downloads are transparent PNGs (no raw SVG → no recolor path, but ideal
+  decoration layers). Freepik serves raster previews on free/paid keys and only
+  the SVG-recolor path requires an SVG-serving source (or the local assets
+  library, which now also parses to editable vectors); Free-license items need
+  attribution and premium items are filtered. Vecteezy/Unsplash are swappable
+  behind the same interface. See §5 for the app-embedding licensing discussion.
+
 ---
 
 ## 3. Architecture — current vs. target

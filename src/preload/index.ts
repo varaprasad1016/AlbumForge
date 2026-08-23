@@ -97,6 +97,16 @@ const api: AlbumForgeApi = {
   recommend: {
     suggest: (photoIds, eventType) => ipcRenderer.invoke("recommend:suggest", photoIds, eventType),
   },
+  stock: {
+    configured: () => ipcRenderer.invoke("stock:configured"),
+    provider: () => ipcRenderer.invoke("stock:provider"),
+    setProvider: (provider) => ipcRenderer.invoke("stock:setProvider", provider),
+    setApiKey: (provider, key) => ipcRenderer.invoke("stock:setApiKey", provider, key),
+    search: (term, kind) => ipcRenderer.invoke("stock:search", term, kind),
+    download: (providerId, input) => ipcRenderer.invoke("stock:download", providerId, input),
+    parseSvg: (svg) => ipcRenderer.invoke("stock:parseSvg", svg),
+    recent: (limit) => ipcRenderer.invoke("stock:recent", limit),
+  },
 };
 
 contextBridge.exposeInMainWorld("albumforge", api);

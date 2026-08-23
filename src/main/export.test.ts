@@ -111,4 +111,70 @@ describe("spread export", () => {
     const doc = await PDFDocument.load(pdf);
     expect(doc.getPageCount()).toBe(1);
   });
+
+  it("renders stock-vector (recolorable paths) and stock-photo layers", async () => {
+    await makePhoto("p4", 3000, 2000);
+    // A real transparent PNG to stand in for a downloaded stock asset.
+    const pngPath = `${process.env.TEMP ?? "/tmp"}/af-export-test-stock.png`;
+    await sharp({
+      create: {
+        width: 200,
+        height: 200,
+        channels: 4,
+        background: { r: 190, g: 120, b: 40, alpha: 0.6 },
+      },
+    })
+      .png()
+      .toFile(pngPath);
+    const resolveStock = (providerId: string) => (providerId === "freepik-1" ? { path: pngPath } : null);
+    const page: ExportPage = {
+      layoutKey: "full_bleed",
+      background: { color: "#ffffff", image: { stockId: "freepik-1" } },
+      elements: [
+        imageEl("p4", 0, 0, 1, 1, 0),
+        {
+          type: "stock-vector",
+          photoId: null,
+          x: 0.1,
+          y: 0.1,
+          width: 0.3,
+          height: 0.2,
+          rotation: 0,
+          crop: null,
+          text: null,
+          style: {
+            stockId: "freepik-0",
+            width: 100,
+            height: 100,
+            opacity: 0.9,
+            vector: {
+              width: 100,
+              height: 100,
+              groups: [
+                { color: "#ff0000", paths: ["M0 0L100 0L100 100Z"] },
+                { color: "#0000ff", paths: ["M0 0L100 0L50 50Z"] },
+              ],
+            },
+          },
+          z: 1,
+        },
+        {
+          type: "stock-photo",
+          photoId: null,
+          x: 0.5,
+          y: 0.5,
+          width: 0.3,
+          height: 0.3,
+          rotation: 0,
+          crop: null,
+          text: null,
+          style: { stockId: "freepik-1", opacity: 1 },
+          z: 2,
+        },
+      ],
+    };
+    const pdf = await buildPdf([page], resolvePhoto, 100, 100, 60, 3, undefined, undefined, undefined, resolveStock);
+    const doc = await PDFDocument.load(pdf);
+    expect(doc.getPageCount()).toBe(1);
+  });
 });
