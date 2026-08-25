@@ -127,7 +127,8 @@ jobs:
         run: |
           node -e "const p=require('./package.json'); if (p.version !== '${{ needs.release.outputs.version }}') throw new Error('Version mismatch: '+p.version)"
           test -f src/renderer/src/pages/SettingsPage.tsx
-          grep -q 'bg-gradient-to-br from-amber-500' src/renderer/src/pages/SettingsPage.tsx || true
+          grep -q 'from-amber-500' src/renderer/src/index.css
+          grep -q 'Loading element' src/renderer/src/components/AlbumEditor.tsx
 
       - name: Install dependencies
         run: npm install

@@ -274,7 +274,7 @@ export default function AlbumEditor({
     pattern?: string;
     image?: { stockId?: string; title?: string; author?: string | null; attributionRequired?: boolean };
   } | null) ?? {};
-  const bgColor = bg.color ?? "#ffffff";
+  const bgColor = bg.color ?? "#fffdf8";
   const bgPattern = bg.pattern ?? null;
   const patternImg = useLoadedImage(patternDataUri(bgPattern) ?? undefined);
   const bgImg = useLoadedImage(bg.image?.stockId ? `stock://asset/${bg.image.stockId}` : undefined);
@@ -866,7 +866,7 @@ export default function AlbumEditor({
       photoId: null,
       crop: null,
       text: null,
-      style: { shape, fill: "#6366f1", stroke: "#6366f1", strokeWidth: 2, opacity: 1, radius: 8 },
+      style: { shape, fill: "#d6b06f", stroke: "#9b6a2d", strokeWidth: 2, opacity: 1, radius: 8 },
     };
     void persist(mutateElements([...elements, el]));
   }
@@ -897,7 +897,7 @@ export default function AlbumEditor({
       const g = findGraphic(graphicId);
       if (!g) return;
       h = w * (g.h / g.w);
-      style = { graphicId, color: "#6366f1", opacity: 1 };
+      style = { graphicId, color: "#b17e36", opacity: 1 };
     }
     const el: AlbumElement = {
       id: `new-${Date.now()}`,
@@ -2572,7 +2572,7 @@ function ElementNode({
 
   if (el.type === "graphic") {
     const style = (el.style ?? {}) as { graphicId?: string; color?: string; opacity?: number; assetUri?: string };
-    const color = style.color ?? "#0f172a";
+    const color = style.color ?? "#b17e36";
     const opacity = style.opacity ?? 1;
     const assetImg = useLoadedImage(style.assetUri ?? undefined);
     const g = style.assetUri ? undefined : findGraphic(style.graphicId ?? "");
@@ -2660,7 +2660,8 @@ function ElementNode({
         onDragEnd={onDragEnd}
         onTransformEnd={onTransformEnd}
       >
-        {stockImg ? <KImage image={stockImg} width={w} height={h} /> : <Rect width={w} height={h} fill="#e5e7eb" />}
+        {stockImg ? <KImage image={stockImg} width={w} height={h} /> : <Rect width={w} height={h} fill="#fffaf0" stroke="#d6b06f" strokeWidth={1} dash={[4, 4]} />}
+        {!stockImg && <KText text="Loading element…" width={w} y={h / 2 - 7} align="center" fontSize={12} fill="#9b6a2d" listening={false} />}
         {selected && <Rect width={w} height={h} stroke="#5b5bd6" strokeWidth={1} listening={false} />}
       </Group>
     );
