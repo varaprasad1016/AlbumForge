@@ -191,13 +191,17 @@ jobs:
         working-directory: mobile
         run: npx cap sync android
 
+      - name: Prepare Gradle wrapper
+        working-directory: mobile/android
+        run: chmod +x gradlew
+
       - name: Verify Android toolchain
         working-directory: mobile/android
         run: ./gradlew --version
 
       - name: Build debug APK (fixed demo keystore)
         working-directory: mobile/android
-        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon -PafVersionName=${{ needs.release.outputs.version }}
+        run: ./gradlew assembleDebug --no-daemon -PafVersionName=${{ needs.release.outputs.version }}
 
       - name: Publish APK to m-* release
         env:
