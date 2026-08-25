@@ -86,6 +86,68 @@ export function seedDesigns(): void {
   }
 }
 
+function stableValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, item]) => [key, stableValue(item)]),
+    );
+  }
+  return value;
+}
+
+function templateSignature(templateId: string, style: string | null): string {
+  const layouts = all("SELECT key, slots, weight, min_photos, max_photos FROM template_layouts WHERE template_id = ?", [templateId]) as Array<Record<string, unknown>>;
+  const normalizedLayouts = layouts
+    .map((layout) => ({
+      key: layout.key,
+      slots: JSON.parse(layout.slots as string),
+      weight: layout.weight,
+      minPhotos: layout.min_photos,
+      maxPhotos: layout.max_photos,
+    }))
+    .sort((a, b) => String(a.key).localeCompare(String(b.key)));
+  return JSON.stringify(stableValue({ style: JSON.parse(style ?? "{}"), layouts: normalizedLayouts }));
+}
+
+function removeDuplicateTemplates(): void {
+  const rows = all("SELECT id, key, style FROM templates ORDER BY is_system DESC, id") as Array<Record<string, unknown>>;
+  const catalogOrder = new Map(TEMPLATE_FAMILIES.map((family, index) => [family.key, index]));
+  const canonicalBySignature = new Map<string, string>();
+  const duplicateIds: string[] = [];
+
+  for (const row of rows) {
+    const id = row.id as string;
+    const signature = templateSignature(id, row.style as string | null);
+    const existing = canonicalBySignature.get(signature);
+    if (!existing) {
+      canonicalBySignature.set(signature, id);
+      continue;
+    }
+    const existingRow = rows.find((candidate) => candidate.id === existing)!;
+    const existingRank = catalogOrder.get(existingRow.key as string) ?? Number.MAX_SAFE_INTEGER;
+    const currentRank = catalogOrder.get(row.key as string) ?? Number.MAX_SAFE_INTEGER;
+    if (currentRank < existingRank) {
+      canonicalBySignature.set(signature, id);
+      duplicateIds.push(existing);
+    } else {
+      duplicateIds.push(id);
+    }
+  }
+
+  for (const duplicateId of duplicateIds) {
+    const duplicate = rows.find((row) => row.id === duplicateId);
+    if (!duplicate) continue;
+    const canonicalId = canonicalBySignature.get(templateSignature(duplicateId, duplicate.style as string | null));
+    if (!canonicalId || canonicalId === duplicateId) continue;
+    run("UPDATE albums SET template_id = ? WHERE template_id = ?", [canonicalId, duplicateId]);
+    run("DELETE FROM template_layouts WHERE template_id = ?", [duplicateId]);
+    run("DELETE FROM templates WHERE id = ?", [duplicateId]);
+  }
+}
+
 export function seedTemplates(): void {
   for (const fam of TEMPLATE_FAMILIES) {
     const existing = get("SELECT id FROM templates WHERE key = ?", [fam.key]) as { id: string } | undefined;
@@ -112,4 +174,6 @@ export function seedTemplates(): void {
       run("INSERT INTO template_layouts (id, template_id, key, name, slots, weight, min_photos, max_photos, sort_order) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)", [newId(), templateId, layout.key, layout.name, JSON.stringify(layout.slots), weight, layout.slots.length, sort]);
     }
   }
+
+  removeDuplicateTemplates();
 }
