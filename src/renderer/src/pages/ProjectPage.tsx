@@ -232,7 +232,7 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
 
       {total === 0 && !importing && (
         <div className="card mb-6 overflow-hidden">
-          <div className="bg-gradient-to-br from-indigo-500 to-violet-600 p-8 text-center text-white">
+          <div className="bg-gradient-to-br from-[#9b6a2d] via-[#c99a55] to-[#ead19f] p-8 text-center text-white">
             <h2 className="text-lg font-semibold">No photos yet</h2>
             <p className="mx-auto mt-2 max-w-lg text-sm text-indigo-100">
               Import your finished photographs to begin. AlbumForge analyses them locally
@@ -258,7 +258,7 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
           </div>
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
             <div
-              className="h-1.5 rounded-full bg-gradient-to-r from-indigo-500 to-violet-600 transition-all"
+              className="h-1.5 rounded-full bg-gradient-to-r from-[#9b6a2d] via-[#c99a55] to-[#ead19f] transition-all"
               style={{ width: `${(progress.current / progress.total) * 100}%` }}
             />
           </div>
@@ -395,7 +395,7 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
                     void loadPhotos(true);
                   }}
                   className={`w-full rounded-lg px-2.5 py-1.5 text-left transition-colors ${
-                    activeGroupId === null ? "bg-indigo-50 font-semibold text-brand" : "hover:bg-slate-50"
+                    activeGroupId === null ? "bg-amber-50 font-semibold text-brand" : "hover:bg-slate-50"
                   }`}
                 >
                   All photos ({total})
@@ -409,7 +409,7 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
                       void loadPhotos(true);
                     }}
                     className={`flex-1 rounded-lg px-2.5 py-1.5 text-left transition-colors ${
-                      activeGroupId === g.id ? "bg-indigo-50 font-semibold text-brand" : "hover:bg-slate-50"
+                      activeGroupId === g.id ? "bg-amber-50 font-semibold text-brand" : "hover:bg-slate-50"
                     }`}
                   >
                     {g.name} ({g.photoCount})
@@ -448,7 +448,7 @@ export default function ProjectPage({ projectId }: { projectId: string }) {
                 <li key={a.id}>
                   <a
                     href={`#/albums/${a.id}`}
-                    className="block rounded-lg border border-slate-200 px-3 py-2 text-sm transition-colors hover:border-brand hover:bg-indigo-50/50"
+                    className="block rounded-lg border border-slate-200 px-3 py-2 text-sm transition-colors hover:border-brand hover:bg-amber-50/50"
                   >
                     {a.name} · {a.pageCount} pages
                   </a>

@@ -44,6 +44,7 @@ jobs:
           # Always build from the highest existing package version, not from a
           # stale checkout/package file left behind by an earlier release run.
           git fetch --tags origin
+          git fetch origin main
           node <<'NODE'
             const fs = require('fs');
             const { execFileSync } = require('child_process');
@@ -120,6 +121,13 @@ jobs:
       # build from the bumped tip so the packaged version matches the release tag.
       - name: Check out the bumped commit
         run: git fetch origin main && git reset --hard origin/main
+
+      - name: Verify packaged source and version
+        shell: bash
+        run: |
+          node -e "const p=require('./package.json'); if (p.version !== '${{ needs.release.outputs.version }}') throw new Error('Version mismatch: '+p.version)"
+          test -f src/renderer/src/pages/SettingsPage.tsx
+          grep -q 'bg-gradient-to-br from-amber-500' src/renderer/src/pages/SettingsPage.tsx || true
 
       - name: Install dependencies
         run: npm install

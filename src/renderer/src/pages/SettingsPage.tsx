@@ -146,7 +146,7 @@ export default function SettingsPage() {
                 <p className="mb-1 text-slate-500">{t("settings.downloading", { percent: update.percent })}</p>
                 <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
                   <div
-                    className="h-1.5 rounded-full bg-gradient-to-r from-indigo-500 to-violet-600 transition-all"
+                    className="h-1.5 rounded-full bg-gradient-to-r from-amber-500 to-yellow-700 transition-all"
                     style={{ width: `${update.percent}%` }}
                   />
                 </div>
@@ -160,7 +160,7 @@ export default function SettingsPage() {
         <section className="card p-5">
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">About</h2>
           <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-lg font-bold text-white shadow-sm">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-yellow-700 text-lg font-bold text-white shadow-sm">
               A
             </span>
             <div>
@@ -185,7 +185,7 @@ export default function SettingsPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="w-96 rounded-2xl border border-slate-200 bg-white p-5 shadow-card">
             <div className="flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-yellow-700 text-white">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M7 16l-4-4 4-4m10 8l4-4-4-4M14 4l-4 16" />
                 </svg>

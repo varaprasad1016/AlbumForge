@@ -125,7 +125,7 @@ export default function AlbumPage({ albumId }: { albumId: string }) {
               onClick={() => setTab(t)}
               className={`rounded-lg px-4 py-1.5 text-sm font-semibold capitalize transition-colors ${
                 tab === t
-                  ? "bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-sm"
+                  ? "bg-gradient-to-br from-amber-500 to-yellow-700 text-white shadow-sm"
                   : "text-slate-600 hover:bg-slate-100"
               }`}
             >

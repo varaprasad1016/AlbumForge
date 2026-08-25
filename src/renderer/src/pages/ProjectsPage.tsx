@@ -33,12 +33,12 @@ export default function ProjectsPage() {
     <div>
       {projects.length === 0 && (
         <div className="card mb-8 overflow-hidden">
-          <div className="bg-gradient-to-br from-indigo-500 to-violet-600 p-8 text-center text-white">
+          <div className="bg-gradient-to-br from-[#9b6a2d] via-[#c99a55] to-[#ead19f] p-8 text-center text-white">
             <span className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-white/20 text-xl font-bold backdrop-blur">
               A
             </span>
             <h2 className="text-2xl font-bold">Welcome to AlbumForge</h2>
-            <p className="mx-auto mt-2 max-w-xl text-sm text-indigo-100">
+            <p className="mx-auto mt-2 max-w-xl text-sm text-amber-50">
               Turn thousands of finished photographs into professionally laid-out albums
               automatically — create a project, import your photos, pick a template, and
               generate complete album proposals. All on this computer, nothing uploaded.
@@ -99,7 +99,7 @@ export default function ProjectsPage() {
                   className="card block overflow-hidden transition-all duration-200 hover:-translate-y-1 hover:shadow-lift"
                 >
                   <div className="relative aspect-[4/3] w-full overflow-hidden bg-slate-100">
-                    <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-indigo-100 to-violet-100 text-4xl font-display font-bold text-indigo-400">
+                    <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-amber-100 to-yellow-100 text-4xl font-display font-bold text-amber-700">
                       {p.name.charAt(0).toUpperCase()}
                     </div>
                     {p.thumbnailPhotoId && (

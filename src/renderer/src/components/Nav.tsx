@@ -52,7 +52,7 @@ export default function Nav() {
   return (
     <aside className="fixed inset-y-0 left-0 z-40 flex w-60 flex-col border-r border-slate-200/60 bg-surface/85 backdrop-blur-xl">
       <a href="#/projects" className="flex items-center gap-3 px-5 pb-4 pt-6">
-        <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-500 font-display text-lg font-bold text-white shadow-lg shadow-indigo-500/30">
+        <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-500 via-amber-600 to-yellow-700 font-display text-lg font-bold text-white shadow-lg shadow-amber-500/30">
           A
         </span>
         <div>
@@ -70,11 +70,11 @@ export default function Nav() {
               href={l.href}
               className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all duration-150 ${
                 active
-                  ? "bg-gradient-to-r from-indigo-500/10 to-violet-500/10 text-brand"
+                  ? "bg-gradient-to-r from-amber-500/10 to-yellow-600/10 text-brand"
                   : "text-slate-500 hover:bg-slate-100/80 hover:text-slate-700"
               }`}
             >
-              {active && <span className="absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-full bg-gradient-to-b from-indigo-500 to-violet-600" />}
+              {active && <span className="absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-full bg-gradient-to-b from-amber-500 to-yellow-700" />}
               {l.icon}
               {t(l.key)}
             </a>
