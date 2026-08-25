@@ -32,21 +32,29 @@ export default function ProjectsPage() {
 
   return (
     <div>
+      <div className="mb-6 flex items-end justify-between gap-4">
+        <div>
+          <p className="mb-1 text-xs font-semibold uppercase tracking-[0.2em] text-amber-600">Workspace</p>
+          <h1 className="text-3xl font-bold text-ink">Projects</h1>
+          <p className="mt-1 text-sm text-slate-500">Create and curate beautiful client albums.</p>
+        </div>
+        {projects.length > 0 && <span className="chip">{projects.length} project{projects.length === 1 ? "" : "s"}</span>}
+      </div>
       {projects.length === 0 && (
         <div className="card mb-8 overflow-hidden">
-          <div className="bg-gradient-to-br from-indigo-500 to-violet-600 p-8 text-center text-white">
+          <div className="bg-gradient-to-br from-[#9b6a2d] via-[#c99a55] to-[#ead19f] p-8 text-center text-white">
             <span className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-white/20 text-xl font-bold backdrop-blur">
               A
             </span>
             <h2 className="text-2xl font-bold">Welcome to AlbumForge</h2>
-            <p className="mx-auto mt-2 max-w-xl text-sm text-indigo-100">
+            <p className="mx-auto mt-2 max-w-xl text-sm text-amber-50">
               Turn thousands of finished photographs into professionally laid-out albums
               automatically — create a project, import your photos, pick a template, and
               generate complete album proposals. All on this computer, nothing uploaded.
             </p>
           </div>
           <div className="p-6">
-            <h1 className="mb-3 text-lg font-semibold text-ink">Create your first project</h1>
+            <h2 className="mb-3 text-lg font-semibold text-ink">Create your first project</h2>
             <form onSubmit={create} className="flex flex-wrap gap-2">
               <input
                 value={name}
@@ -70,10 +78,6 @@ export default function ProjectsPage() {
 
       {projects.length > 0 && (
         <>
-          <div className="mb-6 flex items-center justify-between">
-            <h1 className="text-2xl font-bold">Projects</h1>
-          </div>
-
           <form onSubmit={create} className="mb-6 flex flex-wrap gap-2">
             <input
               value={name}

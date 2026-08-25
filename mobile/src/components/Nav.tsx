@@ -56,7 +56,7 @@ export default function Nav() {
 
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-surface/95 backdrop-blur"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-[#eadfce] bg-[#fffdf8]/95 backdrop-blur"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
       <div className="flex">
@@ -64,7 +64,7 @@ export default function Nav() {
           const active = root === tab.key;
           return (
             <a key={tab.key} href={tab.href} className="relative flex flex-1 flex-col items-center gap-0.5 py-2">
-              {active && <span className="absolute top-0 h-0.5 w-8 rounded-full bg-gradient-to-r from-indigo-500 to-violet-500" />}
+              {active && <span className="absolute top-0 h-0.5 w-8 rounded-full bg-gradient-to-r from-amber-500 to-yellow-700" />}
               <Icon name={tab.key} active={active} />
               <span className={`text-[11px] font-medium ${active ? "text-brand" : "text-slate-400"}`}>{t(tab.labelKey)}</span>
             </a>

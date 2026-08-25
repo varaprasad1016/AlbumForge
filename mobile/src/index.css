@@ -15,31 +15,31 @@
 }
 
 :root {
-  --brand: 99 102 241;
-  --ink: 15 23 42;
-  --surface: 255 255 255;
-  --shadow-soft: 0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 30px -10px rgba(15, 23, 42, 0.12);
-  --shadow-lift: 0 2px 4px rgba(15, 23, 42, 0.05), 0 18px 44px -14px rgba(15, 23, 42, 0.22);
+  --brand: 177 126 54;
+  --ink: 54 42 32;
+  --surface: 255 253 248;
+  --shadow-soft: 0 1px 2px rgba(93, 69, 43, 0.05), 0 10px 30px -10px rgba(93, 69, 43, 0.14);
+  --shadow-lift: 0 2px 4px rgba(93, 69, 43, 0.06), 0 18px 44px -14px rgba(93, 69, 43, 0.2);
 
-  --slate-50: 248 250 252;
-  --slate-100: 241 245 249;
-  --slate-200: 226 232 240;
-  --slate-300: 203 213 225;
-  --slate-400: 148 163 184;
-  --slate-500: 100 116 139;
-  --slate-600: 71 85 105;
-  --slate-700: 51 65 85;
-  --slate-800: 30 41 59;
-  --slate-900: 15 23 42;
+  --slate-50: 255 253 248;
+  --slate-100: 250 245 236;
+  --slate-200: 235 224 207;
+  --slate-300: 218 201 177;
+  --slate-400: 166 143 112;
+  --slate-500: 126 103 75;
+  --slate-600: 96 73 48;
+  --slate-700: 73 52 35;
+  --slate-800: 54 42 32;
+  --slate-900: 39 29 22;
 
-  --neutral-200: 229 229 229;
+  --neutral-200: 235 224 207;
 
-  --indigo-50: 238 242 255;
-  --indigo-100: 224 231 255;
-  --indigo-600: 79 70 229;
-  --violet-100: 237 233 254;
-  --amber-50: 255 251 235;
-  --amber-600: 217 119 6;
+  --indigo-50: 250 242 225;
+  --indigo-100: 241 220 179;
+  --indigo-600: 153 103 36;
+  --violet-100: 244 230 199;
+  --amber-50: 253 246 230;
+  --amber-600: 177 126 54;
   --emerald-50: 236 253 245;
   --emerald-600: 5 150 105;
   --emerald-700: 4 120 87;
@@ -89,8 +89,8 @@ body,
 body {
   @apply bg-slate-50 text-ink font-sans antialiased;
   background-image:
-    radial-gradient(1100px 500px at 0% -5%, rgba(99, 102, 241, 0.08) 0%, transparent 60%),
-    radial-gradient(900px 500px at 100% -5%, rgba(139, 92, 246, 0.07) 0%, transparent 55%);
+    radial-gradient(1100px 500px at 0% -5%, rgba(214, 176, 111, 0.18) 0%, transparent 60%),
+    radial-gradient(900px 500px at 100% -5%, rgba(244, 230, 199, 0.35) 0%, transparent 55%);
   background-attachment: fixed;
 }
 
@@ -155,28 +155,28 @@ main > * {
   }
 
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-indigo-500 via-violet-500 to-violet-600 px-4 py-2 text-sm font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 disabled:cursor-not-allowed disabled:opacity-50;
-    box-shadow: 0 6px 18px -6px rgb(99 102 241 / 0.55);
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-amber-500 via-amber-600 to-yellow-700 px-4 py-2 text-sm font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 disabled:cursor-not-allowed disabled:opacity-50;
+    box-shadow: 0 6px 18px -6px rgb(177 126 54 / 0.5);
   }
   .btn-primary:hover:not(:disabled) {
     transform: translateY(-1px);
     filter: brightness(1.06);
-    box-shadow: 0 10px 24px -8px rgb(99 102 241 / 0.6);
+    box-shadow: 0 10px 24px -8px rgb(177 126 54 / 0.58);
   }
   .btn-primary:active:not(:disabled) {
     transform: scale(0.98);
   }
 
   .btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-surface px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition-all duration-150 hover:border-slate-300 hover:bg-slate-50 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-surface px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition-all duration-150 hover:border-amber-300 hover:bg-amber-50 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 disabled:cursor-not-allowed disabled:opacity-50;
   }
 
   .btn-ghost {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl px-3 py-1.5 text-sm font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-3 py-1.5 text-sm font-medium text-slate-500 transition-colors hover:bg-amber-50 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300;
   }
 
   .input {
-    @apply w-full rounded-xl border border-slate-200 bg-surface px-3 py-2 text-sm text-slate-800 shadow-sm transition-all placeholder:text-slate-400 hover:border-slate-300 focus:border-indigo-400 focus:shadow-md focus:outline-none focus:ring-2 focus:ring-indigo-100;
+    @apply w-full rounded-xl border border-slate-200 bg-surface px-3 py-2 text-sm text-slate-800 shadow-sm transition-all placeholder:text-slate-400 hover:border-amber-300 focus:border-amber-500 focus:shadow-md focus:outline-none focus:ring-2 focus:ring-amber-100;
   }
 
   .field-label {
