@@ -41,7 +41,33 @@ jobs:
         id: bump
         if: steps.skip.outputs.skipped == 'false'
         run: |
-          npm version patch --no-git-tag-version
+          # Always build from the highest existing package version, not from a
+          # stale checkout/package file left behind by an earlier release run.
+          git fetch --tags origin
+          node <<'NODE'
+            const fs = require('fs');
+            const { execFileSync } = require('child_process');
+            const semver = (v) => v.replace(/^v/, '').split('.').map(Number);
+            const current = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
+            const tags = execFileSync('git', ['tag', '--list', 'v*'], { encoding: 'utf8' })
+              .trim().split(/\s+/).filter(Boolean);
+            const versions = [current, ...tags.map((tag) => tag.replace(/^v/, ''))]
+              .filter((v) => /^\d+\.\d+\.\d+$/.test(v));
+            const latest = versions.sort((a, b) => {
+              const av = semver(a); const bv = semver(b);
+              return (bv[0] - av[0]) || (bv[1] - av[1]) || (bv[2] - av[2]);
+            })[0];
+            const next = semver(latest);
+            next[2] += 1;
+            const version = next.join('.');
+            for (const file of ['package.json', 'package-lock.json']) {
+              const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+              data.version = version;
+              if (file.endsWith('package-lock.json') && data.packages?.['']) data.packages[''].version = version;
+              fs.writeFileSync(file, JSON.stringify(data, null, 2) + '\n');
+            }
+            console.log(`Bumping ${latest} -> ${version}`);
+          NODE
           VERSION="$(node -p "require('./package.json').version")"
           # Keep the mobile app on the same version so the Android updater
           # (which compares against the latest m-* release) tracks desktop.
@@ -50,6 +76,7 @@ jobs:
             for (const f of ['mobile/package.json', 'mobile/package-lock.json']) {
               const p = JSON.parse(fs.readFileSync(f, 'utf8'));
               p.version = process.argv[1];
+              if (f.endsWith('package-lock.json') && p.packages?.['']) p.packages[''].version = process.argv[1];
               fs.writeFileSync(f, JSON.stringify(p, null, 2) + '\n');
             }
           " "$VERSION"
