@@ -1,6 +1,7 @@
 /** SQLite (WASM via sql.js) storage for the mobile app. Persisted to the app sandbox. */
 import initSqlJs from "sql.js";
 import wasmUrl from "sql.js/dist/sql-wasm.wasm?url";
+import { Capacitor } from "@capacitor/core";
 import { Directory, Filesystem } from "@capacitor/filesystem";
 
 let SQL: any = null;
@@ -70,8 +71,10 @@ export async function initDb(): Promise<void> {
   SQL = await initSqlJs({ locateFile: () => wasmUrl });
   let loaded: Uint8Array | null = null;
   try {
-    const res = await Filesystem.readFile({ path: "albumforge.sqlite", directory: Directory.Data });
-    loaded = base64ToBytes(res.data as string);
+    const data = Capacitor.isNativePlatform()
+      ? (await Filesystem.readFile({ path: "albumforge.sqlite", directory: Directory.Data })).data
+      : localStorage.getItem("albumforge.sqlite");
+    if (data) loaded = base64ToBytes(data as string);
   } catch {
     /* fresh database */
   }
@@ -125,9 +128,14 @@ export function run(sql: string, params: any[] = []): void {
 }
 
 export async function persistDb(): Promise<void> {
+  const data = bytesToBase64(db.export());
+  if (!Capacitor.isNativePlatform()) {
+    localStorage.setItem("albumforge.sqlite", data);
+    return;
+  }
   await Filesystem.writeFile({
     path: "albumforge.sqlite",
-    data: bytesToBase64(db.export()),
+    data,
     directory: Directory.Data,
   });
 }
