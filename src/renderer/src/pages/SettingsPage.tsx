@@ -140,6 +140,7 @@ export default function SettingsPage() {
 
           <div className="mt-3 text-sm">
             {update.phase === "checking" && <p className="text-slate-500">{t("settings.checking")}</p>}
+            {update.phase === "idle" && info?.version && <p className="text-slate-400">Current version: v{info.version}</p>}
             {update.phase === "downloading" && (
               <div>
                 <p className="mb-1 text-slate-500">{t("settings.downloading", { percent: update.percent })}</p>

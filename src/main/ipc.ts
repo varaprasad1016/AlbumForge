@@ -132,6 +132,15 @@ export function registerIpc(ctx: IpcContext): void {
   // the user first, then triggers downloadUpdate() explicitly.
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
+  // Keep update checks pointed at the public GitHub release feed even when the
+  // installer was built without a publish token. electron-builder supplies the
+  // same owner/repo metadata, but an explicit feed avoids stale/missing config.
+  autoUpdater.setFeedURL({
+    provider: "github",
+    owner: "varaprasad1016",
+    repo: "AlbumForge",
+    releaseType: "release",
+  });
   const send = (ev: unknown) => getWindow()?.webContents.send("update:event", ev);
   autoUpdater.on("checking-for-update", () => send({ type: "checking" }));
   autoUpdater.on("update-available", (info) => send({ type: "available", version: info.version }));
@@ -163,7 +172,8 @@ export function registerIpc(ctx: IpcContext): void {
   ipcMain.handle("app:checkForUpdates", async () => {
     if (!app.isPackaged) return "Updates are only available in the installed app.";
     try {
-      await autoUpdater.checkForUpdates();
+      // Clear a previously cached provider response before querying GitHub.
+      await autoUpdater.checkForUpdatesAndNotify();
       return "checking";
     } catch (e) {
       return `Update check failed: ${String(e)}`;
