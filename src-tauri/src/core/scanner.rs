@@ -104,66 +104,58 @@ fn inspect(path: &Path) -> Option<ScannedPhoto> {
     };
 
     // EXIF is optional — a missing or corrupt block must not fail the scan.
-    if let Ok(exif) = kamadak_exif::Reader::new().read_from_file(path) {
-        photo.taken_at = field_string(&exif, kamadak_exif::Field::DateTimeOriginal);
-        photo.orientation = field_u16(&exif, kamadak_exif::Field::Orientation).unwrap_or(1);
-        photo.latitude = gps_degrees(
-            &exif,
-            kamadak_exif::Field::GPSLatitude,
-            kamadak_exif::Field::GPSLatitudeRef,
-        );
-        photo.longitude = gps_degrees(
-            &exif,
-            kamadak_exif::Field::GPSLongitude,
-            kamadak_exif::Field::GPSLongitudeRef,
-        );
+    if let Some(exif) = read_exif(path) {
+        photo.taken_at = field_string(&exif, exif::Tag::DateTimeOriginal);
+        photo.orientation = field_u16(&exif, exif::Tag::Orientation).unwrap_or(1);
+        photo.latitude = gps_degrees(&exif, exif::Tag::GPSLatitude, exif::Tag::GPSLatitudeRef);
+        photo.longitude = gps_degrees(&exif, exif::Tag::GPSLongitude, exif::Tag::GPSLongitudeRef);
     }
 
     Some(photo)
 }
 
+fn read_exif(path: &Path) -> Option<exif::Exif> {
+    let file = std::fs::File::open(path).ok()?;
+    let mut reader = std::io::BufReader::new(file);
+    exif::Reader::new().read_from_container(&mut reader).ok()
+}
+
 /// Read the EXIF orientation tag (defaults to 1 = as-is). Shared by the
 /// proxy and export pipelines so previews match the printed page.
 pub fn read_orientation(path: &Path) -> Option<u16> {
-    let exif = kamadak_exif::Reader::new().read_from_file(path).ok()?;
-    field_u16(&exif, kamadak_exif::Field::Orientation).filter(|o| (1..=8).contains(o))
+    let exif = read_exif(path)?;
+    field_u16(&exif, exif::Tag::Orientation).filter(|o| (1..=8).contains(o))
 }
 
-fn field_string(exif: &kamadak_exif::Exif, field: kamadak_exif::Field) -> Option<String> {
-    exif.get_field(field)
-        .map(|f| f.value.display_value().to_string())
+fn field_string(exif: &exif::Exif, tag: exif::Tag) -> Option<String> {
+    exif.get_field(tag, exif::In::PRIMARY)
+        .map(|f| f.value.display_as(f.tag).to_string())
 }
 
-fn field_u16(exif: &kamadak_exif::Exif, field: kamadak_exif::Field) -> Option<u16> {
-    exif.get_field(field).and_then(|f| match f.value {
-        kamadak_exif::Value::Short(ref v) => v.first().copied(),
+fn field_u16(exif: &exif::Exif, tag: exif::Tag) -> Option<u16> {
+    exif.get_field(tag, exif::In::PRIMARY).and_then(|f| match f.value {
+        exif::Value::Short(ref v) => v.first().copied(),
         _ => None,
     })
 }
 
 /// Convert a GPS rational field + hemisphere ref to decimal degrees.
-fn gps_degrees(
-    exif: &kamadak_exif::Exif,
-    coord: kamadak_exif::Field,
-    hemis: kamadak_exif::Field,
-) -> Option<f64> {
-    let value = exif.get_field(coord)?.value.clone();
-    let kamadak_exif::Value::Rational(rats) = value else {
+fn gps_degrees(exif: &exif::Exif, coord: exif::Tag, hemis: exif::Tag) -> Option<f64> {
+    let value = exif.get_field(coord, exif::In::PRIMARY)?.value.clone();
+    let exif::Value::Rational(rats) = value else {
         return None;
     };
     let d = rats.first()?;
     let m = rats.get(1)?;
     let s = rats.get(2)?;
-    let mut deg = d.numer() as f64 / d.denom() as f64
-        + (m.numer() as f64 / m.denom() as f64) / 60.0
-        + (s.numer() as f64 / s.denom() as f64) / 3600.0;
+    let mut deg = d.to_f64() + m.to_f64() / 60.0 + s.to_f64() / 3600.0;
     let neg = exif
-        .get_field(hemis)
+        .get_field(hemis, exif::In::PRIMARY)
         .and_then(|f| match f.value {
-            kamadak_exif::Value::Ascii(ref v) => v.first().map(|b| *b),
+            exif::Value::Ascii(ref v) => v.first().and_then(|b| b.first().copied()),
             _ => None,
         })
-        .is_some_and(|b| b == b"S" || b == b"W");
+        .is_some_and(|b| b == b'S' || b == b'W');
     if neg {
         deg = -deg;
     }

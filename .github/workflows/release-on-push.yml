@@ -80,6 +80,13 @@ jobs:
               if (f.endsWith('package-lock.json') && p.packages?.['']) p.packages[''].version = process.argv[1];
               fs.writeFileSync(f, JSON.stringify(p, null, 2) + '\n');
             }
+            // Keep the Tauri native backend on the same version.
+            for (const f of ['src-tauri/Cargo.toml', 'src-tauri/tauri.conf.json']) {
+              let s = fs.readFileSync(f, 'utf8');
+              if (f.endsWith('.toml')) s = s.replace(/^version = \"[^\"]+\"/m, 'version = \"' + process.argv[1] + '\"');
+              else s = s.replace(/\"version\": \"[^\"]+\"/, '\"version\": \"' + process.argv[1] + '\"');
+              fs.writeFileSync(f, s);
+            }
           " "$VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "bumped=true" >> "$GITHUB_OUTPUT"
@@ -89,7 +96,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package.json package-lock.json mobile/package.json mobile/package-lock.json
+          git add package.json package-lock.json mobile/package.json mobile/package-lock.json \
+            src-tauri/Cargo.toml src-tauri/tauri.conf.json
           git commit -m "[skip ci] chore: bump version to v${{ steps.bump.outputs.version }}"
           git push origin main
 

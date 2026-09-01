@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rayon::prelude::*;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::AppState;
 use crate::core::scanner;
@@ -121,7 +121,7 @@ pub fn generate_proxies_parallel(
 }
 
 /// Apply the EXIF orientation tag so proxies match how the photo was shot.
-fn apply_orientation(mut img: image::DynamicImage, src: &Path) -> image::DynamicImage {
+fn apply_orientation(img: image::DynamicImage, src: &Path) -> image::DynamicImage {
     let orientation = scanner::read_orientation(src).unwrap_or(1);
     match orientation {
         3 => img.rotate180(),

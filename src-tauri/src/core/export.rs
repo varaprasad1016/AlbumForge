@@ -130,7 +130,7 @@ fn render_page(page: &ExportPage) -> Result<image::RgbaImage, String> {
         let filtered = apply_filters(resized, &el.filters);
 
         let placed = if el.rotation != 0.0 {
-            image::imageops::rotate(&filtered.to_rgba8(), el.rotation)
+            rotate_arbitrary(&filtered.to_rgba8(), el.rotation)
         } else {
             filtered.to_rgba8()
         };
@@ -153,6 +153,52 @@ fn apply_filters(mut img: image::DynamicImage, f: &Filters) -> image::DynamicIma
         img = adjust_saturation(img, f.saturation);
     }
     img
+}
+
+/// Rotate an RGBA image by an arbitrary angle (degrees, clockwise) with
+/// bilinear sampling; the canvas expands to fit the rotated bounds.
+fn rotate_arbitrary(img: &image::RgbaImage, angle_deg: f32) -> image::RgbaImage {
+    let (w, h) = (img.width() as f32, img.height() as f32);
+    let rad = angle_deg.to_radians();
+    let (sin, cos) = (rad.sin(), rad.cos());
+    let (nw, nh) = (
+        (w * cos.abs() + h * sin.abs()).round().max(1.0) as u32,
+        (w * sin.abs() + h * cos.abs()).round().max(1.0) as u32,
+    );
+    let (cx, cy) = (w / 2.0, h / 2.0);
+    let (ncx, ncy) = (nw as f32 / 2.0, nh as f32 / 2.0);
+    let mut out = image::RgbaImage::from_pixel(nw, nh, image::Rgba([0, 0, 0, 0]));
+    for y in 0..nh {
+        for x in 0..nw {
+            // Inverse map: destination pixel -> source coordinate.
+            let dx = x as f32 - ncx;
+            let dy = y as f32 - ncy;
+            let sx = dx * cos + dy * sin + cx;
+            let sy = -dx * sin + dy * cos + cy;
+            if sx >= 0.0 && sy >= 0.0 && sx <= w - 1.0 && sy <= h - 1.0 {
+                let px = sx.floor() as u32;
+                let py = sy.floor() as u32;
+                let fx = sx - px as f32;
+                let fy = sy - py as f32;
+                let px1 = (px + 1).min(w as u32 - 1);
+                let py1 = (py + 1).min(h as u32 - 1);
+                let p00 = img.get_pixel(px, py).0;
+                let p10 = img.get_pixel(px1, py).0;
+                let p01 = img.get_pixel(px, py1).0;
+                let p11 = img.get_pixel(px1, py1).0;
+                let mut o = [0u8; 4];
+                for c in 0..4 {
+                    let v = p00[c] as f32 * (1.0 - fx) * (1.0 - fy)
+                        + p10[c] as f32 * fx * (1.0 - fy)
+                        + p01[c] as f32 * (1.0 - fx) * fy
+                        + p11[c] as f32 * fx * fy;
+                    o[c] = v.clamp(0.0, 255.0) as u8;
+                }
+                out.put_pixel(x, y, image::Rgba(o));
+            }
+        }
+    }
+    out
 }
 
 fn adjust_saturation(img: image::DynamicImage, amount: f32) -> image::DynamicImage {
