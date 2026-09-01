@@ -180,6 +180,20 @@ jobs:
         with:
           workspaces: src-tauri
 
+      # Tauri 2 on Linux links against webkit2gtk/gtk — gobject-sys fails at
+      # build time without these system packages (gobject-2.0.pc in pkg-config).
+      - name: Install Tauri Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl wget file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
       - name: Install web dependencies
         run: npm install
 

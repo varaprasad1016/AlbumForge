@@ -77,6 +77,19 @@ if (hasCargo && hasRustc) {
   console.log("✔ Rust toolchain installed");
 }
 
+if (process.platform === "linux") {
+  // Tauri 2 links against webkit2gtk/gtk; gobject-sys needs gobject-2.0.pc.
+  const hasGobject =
+    spawnSync("pkg-config", ["--exists", "gobject-2.0"], { stdio: "ignore" }).status === 0;
+  if (!hasGobject) {
+    const hint =
+      "sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev";
+    console.error("✖ Tauri Linux system dependencies missing (gobject-2.0). Install with:");
+    console.error("  " + hint);
+    if (CHECK_ONLY) process.exit(1);
+  }
+}
+
 if (existsSync(join(TAURI_DIR, "Cargo.toml"))) {
   console.log("Building renderer (required by the Tauri build context)…");
   if (run("npm", ["run", "build"], { cwd: ROOT }) !== 0) {
