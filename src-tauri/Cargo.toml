@@ -1,0 +1,36 @@
+[package]
+name = "albumforge"
+version = "0.10.11"
+description = "AlbumForge native backend (Tauri 2 / Rust) — asset scanning, WebP proxies, 300 DPI export"
+authors = ["Vara"]
+edition = "2021"
+
+[lib]
+name = "albumforge_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rayon = "1.10"
+walkdir = "2"
+kamadak-exif = "0.6"
+# Decoders for jpeg/png/webp + parallel ops. Full-size originals are only
+# ever opened inside the native backend (proxy + export), never in the UI.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "rayon"] }
+# Local SQLite storage (ported from better-sqlite3 in the Electron shell).
+# Bundled so no system dependency is required on macOS/Windows/Linux.
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# NOTE: printpdf / tiff land here when the PDF/TIFF assembly step of the
+# export engine is implemented (see src/core/export.rs).
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

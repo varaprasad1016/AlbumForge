@@ -2,6 +2,7 @@
 node_modules/
 out/
 dist/
+target/
 *.local
 
 # Logs
@@ -18,3 +19,6 @@ Thumbs.db
 # Env
 .env
 .env.*
+
+# Tauri (generated at build time)
+src-tauri/gen/

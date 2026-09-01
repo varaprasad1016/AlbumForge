@@ -156,6 +156,40 @@ jobs:
           name: v${{ needs.release.outputs.version }}
           files: ${{ matrix.publish_files }}
 
+  native:
+    # Verify the Rust/Tauri backend compiles on every update. Installs the
+    # Rust toolchain when the runner doesn't have it (dtolnay/rust-toolchain)
+    # and caches the build so `cargo check` stays fast. Non-blocking: the app
+    # still ships as Electron until the shell switch lands.
+    needs: release
+    if: needs.release.outputs.bumped == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Check out the bumped commit
+        run: git fetch origin main && git reset --hard origin/main
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install web dependencies
+        run: npm install
+
+      - name: Build renderer (required by the Tauri build context)
+        run: npm run build
+
+      - name: cargo check (native backend)
+        working-directory: src-tauri
+        run: cargo check
+
   android:
     # Every push also ships an Android APK under an m-* prerelease so the
     # mobile updater (which checks the latest m-* release) tracks desktop.

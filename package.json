@@ -14,6 +14,8 @@
     "start": "electron-vite preview",
     "dist": "electron-vite build && electron-builder --win",
     "dist:dir": "electron-vite build && electron-builder --win --dir",
+    "setup:native": "node scripts/setup-native.mjs",
+    "check:native": "node scripts/setup-native.mjs --check",
     "postinstall": "electron-builder install-app-deps"
   },
   "overrides": {
