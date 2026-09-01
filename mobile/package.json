@@ -1,7 +1,7 @@
 {
   "name": "albumforge-mobile",
   "private": true,
-  "version": "0.10.9",
+  "version": "0.10.10",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
