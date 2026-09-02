@@ -353,6 +353,65 @@ export interface PageUpdate {
   }>;
 }
 
+/* ---------- Commercial suite (blueprint §10 / MIGRATION Phase 9) ---------- */
+
+/** License verdict returned by `license.status` (never throws — typed reasons). */
+export interface LicenseStatus {
+  active: boolean;
+  /** "active" | "expired" | "fingerprint-mismatch" | "invalid-signature" | "not-configured" | "absent" */
+  reason: string;
+  /** Unix seconds the offline lease expires (active leases). */
+  expiresAt: number | null;
+  remainingSeconds: number | null;
+  fingerprint: string | null;
+  licenseId: string | null;
+}
+
+export interface LicenseActivateResult {
+  valid: boolean;
+  detail?: unknown;
+  licenseId?: string;
+  /** True when a signed 7-day offline lease was cached. */
+  offlineLease: boolean;
+}
+
+export interface PrintMmSize {
+  widthMm: number;
+  heightMm: number;
+}
+
+/** Physical print product + export parameters for the payload compiler. */
+export interface PrintSpec {
+  productKey: string;
+  sizeMm: PrintMmSize;
+  bleedMm: number;
+  copies: number;
+  dpi: number;
+  colorMode: string;
+  currency: string;
+}
+
+export interface PrintQuoteInput {
+  /** Lab base cost in minor units (cents). */
+  baseCostCents: number;
+  markupPercent: number;
+  taxPercent: number;
+  currency: string;
+}
+
+export interface PrintQuote {
+  baseCostCents: number;
+  markupCents: number;
+  taxCents: number;
+  totalCents: number;
+  currency: string;
+}
+
+export interface ArchiveSummary {
+  entries: string[];
+  bytes: number;
+}
+
 export interface AlbumForgeApi {
   info(): Promise<AppInfo>;
   openPath(path: string): Promise<void>;
@@ -487,6 +546,33 @@ export interface AlbumForgeApi {
       prompt: string,
       opts?: { width?: number; height?: number },
     ): Promise<{ ok: boolean; asset?: { id: string; name: string; kind: "png"; dataUri: string }; error?: string }>;
+  };
+  /* ---- Commercial suite (native backend; Electron rejects with a message) ---- */
+  license: {
+    status(): Promise<LicenseStatus>;
+    activate(key: string): Promise<LicenseActivateResult>;
+    deactivate(): Promise<void>;
+  };
+  print: {
+    quote(input: PrintQuoteInput): Promise<PrintQuote>;
+    /** Compile a persisted layout JSON into provider order payloads (pure). */
+    payload(
+      layout: unknown,
+      spec: PrintSpec,
+    ): Promise<{ manifest: unknown; prodigi: unknown; gelato: unknown }>;
+  };
+  project: {
+    /** Package a workspace layout into a portable `.album` archive. */
+    saveAlbumFile(targetPath: string, layout: unknown): Promise<ArchiveSummary>;
+    /** 60 s journaled autosave tick target (storage side). */
+    autosave(draftId: string, layout: unknown): Promise<void>;
+    /** Boot hook: newest uncommitted snapshot for a draft, if any. */
+    recover(draftId: string): Promise<unknown | null>;
+    clearRecovery(draftId: string): Promise<void>;
+  };
+  errors: {
+    report(message: string): Promise<void>;
+    lastCrash(): Promise<string | null>;
   };
 }
 

@@ -114,6 +114,39 @@ const api: AlbumForgeApi = {
     setApiKey: (provider, key) => ipcRenderer.invoke("gen:setApiKey", provider, key),
     generate: (prompt, opts) => ipcRenderer.invoke("gen:generate", prompt, opts),
   },
+  // ---- Commercial suite (blueprint §10 / Phase 9): native backend only. The
+  // Electron shell deliberately does not hold licensing/print credentials, so
+  // these reject with an explicit message instead of reaching an IPC handler.
+  license: {
+    status: () =>
+      Promise.reject(new Error("license.status: the licensing engine runs on the native (Tauri) backend — launch via npm run dev:native")),
+    activate: () =>
+      Promise.reject(new Error("license.activate: the licensing engine runs on the native (Tauri) backend — launch via npm run dev:native")),
+    deactivate: () =>
+      Promise.reject(new Error("license.deactivate: the licensing engine runs on the native (Tauri) backend — launch via npm run dev:native")),
+  },
+  print: {
+    quote: () =>
+      Promise.reject(new Error("print.quote: the print fulfilment compiler runs on the native (Tauri) backend — launch via npm run dev:native")),
+    payload: () =>
+      Promise.reject(new Error("print.payload: the print fulfilment compiler runs on the native (Tauri) backend — launch via npm run dev:native")),
+  },
+  project: {
+    saveAlbumFile: () =>
+      Promise.reject(new Error("project.saveAlbumFile: the .album file engine runs on the native (Tauri) backend — launch via npm run dev:native")),
+    autosave: () =>
+      Promise.reject(new Error("project.autosave: the .album file engine runs on the native (Tauri) backend — launch via npm run dev:native")),
+    recover: () =>
+      Promise.reject(new Error("project.recover: the .album file engine runs on the native (Tauri) backend — launch via npm run dev:native")),
+    clearRecovery: () =>
+      Promise.reject(new Error("project.clearRecovery: the .album file engine runs on the native (Tauri) backend — launch via npm run dev:native")),
+  },
+  errors: {
+    report: () =>
+      Promise.reject(new Error("errors.report: the error pipeline runs on the native (Tauri) backend — launch via npm run dev:native")),
+    lastCrash: () =>
+      Promise.reject(new Error("errors.lastCrash: the error pipeline runs on the native (Tauri) backend — launch via npm run dev:native")),
+  },
 };
 
 contextBridge.exposeInMainWorld("albumforge", api);

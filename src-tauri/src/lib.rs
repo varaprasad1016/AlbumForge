@@ -60,6 +60,9 @@ pub fn run() {
             std::fs::create_dir_all(&data_dir)?;
             std::fs::create_dir_all(&cache_dir)?;
             std::fs::create_dir_all(cache_dir.join("proxies"))?;
+            // Crash reporting: sanitised local log + optional Sentry forward
+            // (env DSN) — Phase 9 commercial suite.
+            crate::core::errors::install_panic_hook(&data_dir);
 
             // First native run: adopt the Electron DB if it exists and we
             // have none yet (same schema — no migration needed).
@@ -176,6 +179,18 @@ pub fn run() {
             commands::gen_set_api_key,
             commands::gen_generate,
             commands::photos_palettes,
+            // Commercial suite (blueprint §10 / Phase 9).
+            commands::license_status,
+            commands::license_activate,
+            commands::license_deactivate,
+            commands::print_quote,
+            commands::print_payload,
+            commands::project_save_album_file,
+            commands::project_autosave,
+            commands::project_recover,
+            commands::project_clear_recovery,
+            commands::errors_report,
+            commands::errors_last_crash,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AlbumForge");

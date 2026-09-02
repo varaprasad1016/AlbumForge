@@ -191,3 +191,83 @@ replace the Electron shell.
   assertion.
 - Never commit secrets, `.env`, `config.json`, or generated `gen/`/`target/`
   paths (all already ignored).
+---
+## 10. Commercial & distribution modules (SaaS / retail pass — MIGRATION Phase 9)
+
+Enterprise modules land as **pure, unit-tested `core/*` Rust** + thin commands,
+exactly like the migration phases before them. Distribution posture:
+
+| Module | core file | What runs where |
+|---|---|---|
+| Licensing & seats (Keygen) | `core/license.rs` | Verify/lease **in Rust**; renderer only ever sees `LicenseStatus` verdicts |
+| Print fulfilment (Prodigi/Gelato) | `core/print.rs` | Payload compile + quote **pure Rust**; transport+auth is a command-layer seam |
+| `.album` file engine | `core/project.rs` | Zip builder + recovery journal **pure Rust**; UI schedules the 60 s tick |
+| ICC colour boundary | `core/icc.rs` | Pure fallback matrix; real profiles gated behind Cargo feature `lcms2` |
+| Error pipeline | `core/errors.rs` | Panic hook in Rust, webview hooks via `errors:report`; Sentry forward env-gated |
+
+```
+src-tauri/src/core/
+├── license.rs   # Keygen validate + Ed25519 verify + 7-day lease cache + seat fingerprint
+├── print.rs     # layout JSON → manifest → {prodigi,gelato} payloads + markup quote
+├── project.rs   # .album zip (layout.json + media/) + recovery journal (60 s, boot restore)
+├── icc.rs       # ColorSpace parse, sRGB↔linear, AdobeRGB matrix, CMYK=labs-only
+└── errors.rs    # sanitised crash.log, optional Sentry envelope (env DSN)
+```
+
+### Security invariants (unchanged, now load-bearing)
+
+- **Credentials never cross IPC.** Keygen account/public key and the Sentry DSN
+  are read from the environment in Rust (`ALBUMFORGE_KEYGEN_*`,
+  `ALBUMFORGE_SENTRY_DSN`); print-lab tokens follow the `core/secrets.rs`
+  keychain pattern. The Electron shell rejects these namespaces by design.
+- **Never trust an unsigned lease.** `license.status` requires a valid
+  Ed25519 signature *and* a matching machine fingerprint *and* an unexpired
+  7-day window — a tampered payload reads as `invalid-signature`, not active.
+- **Sanitise before it leaves.** `core/errors.rs` strips user paths and caps
+  entries at 2 KB before any byte is logged or forwarded.
+- **Refuse > approximate.** CMYK output errors until the lcms2/printpdf path
+  exists rather than shipping a wrong colour (`core/icc.rs`).
+
+### Frontend control configurations (how the webview activates these)
+
+All entry points are typed members of `AlbumForgeApi` (src/shared/api.ts),
+driven by the UI like any other namespace; capability flags in backend.ts
+gate the sections:
+
+1. **Licensing** — `license.status()` gates the UI (nav lock / feature flag).
+   A billing UI calls `license.activate(key)` once; the Keygen-validated +
+   signed lease then makes `license.status()` return `active` with
+   `expiresAt` for the 7-day offline window. `license.deactivate()` on
+   sign-out. Unconfigured env → typed reason `not-configured` (honest empty
+   state, never a fake activation).
+2. **Print checkout** — `print.quote({baseCostCents, markupPercent, …})`
+   drives the white-label price card; `print.payload(layout, spec)` compiles
+   the Prodigi/Gelato order JSON shown at review; the export stage (Phase 5)
+   uploads the 300 DPI PDFs and fills the manifest `assetUrl` slots before a
+   command posts the order with keychain-held lab tokens.
+3. **`.album` + crash recovery** — the editor calls `project.autosave` on a
+   60 s timer (layout snapshot into the `<draft>.recovery` journal) and
+   `project.saveAlbumFile(targetPath, layout)` for export-to-file;
+   `project.recover(draftId)` runs at boot after an unclean exit and, when a
+   newer snapshot exists, restores the session then `clearRecovery`.
+   *Implemented:* the 60 s tick lives in AlbumPage (only when pages changed),
+   the boot check renders a “Restore draft / Discard” banner when the journal
+   differs from the committed DB pages, and the export tab exposes the
+   `Save .album file…` action.
+4. **Error pipeline** — `window.onerror`/`unhandledrejection` handlers
+   report through `errors.report` (installed by the seam boot hook, deduped);
+   `errors.lastCrash()` powers a “recover after crash” surface. Rust panics
+   land in the same log via the hook installed in `lib.rs::run`.
+5. **ICC** — export settings select the colour space string; `core/export.rs`
+   maps it through `ColorSpace::parse` and per-pixel `workspace_to_output`
+   (sRGB identity / Adobe RGB matrix), embedding the profile named by
+   `default_profile`.
+
+### Honest boundaries (tracked in MIGRATION.md Phase 9)
+
+The three “write the real integration” items need live accounts/keys a human
+holds: Keygen **validate → signed-lease** arm against a real account (the
+Ed25519 wire contract is implemented and vector-tested), Prodigi/Gelato
+transport+auth (payload shapes are structural; upload URLs arrive with the
+Phase 5 exporter), and an lcms2 C-link on a non-GNU toolchain. The 60 s
+autosave *tick* is the renderer's timer; the journal storage is native.

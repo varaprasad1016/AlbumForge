@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
+import LicenseGate from "./components/LicenseGate";
 import Nav from "./components/Nav";
 import ToastHost from "./components/Toast";
 import AlbumsPage from "./pages/AlbumsPage";
@@ -43,6 +44,10 @@ export default function App() {
 
   return (
     <div className="min-h-screen">
+      {/* Phase 9 license gate — only ever appears for real denials (expired /
+          fingerprint-mismatch / invalid-signature). Unconfigured builds and
+          active leases render nothing. */}
+      <LicenseGate />
       <Nav />
       <main className={`ml-60 ${wide ? "p-6" : "mx-auto max-w-7xl p-8"}`}>{page}</main>
       <ToastHost />

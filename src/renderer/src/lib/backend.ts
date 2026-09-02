@@ -59,8 +59,10 @@ export const backendCapabilities: Record<string, boolean> = (() => {
     "info", "openPath", "clearCache", "openDataFolder",
     "checkForUpdates", "downloadUpdate", "installUpdate", "onUpdateEvent",
     "dialogs", "projects", "photos", "groups", "templates", "fonts",
-    "albums", "exports", "proofs", "assets", "designs", "recommend",
+    "albums",    "exports", "proofs", "assets", "designs", "recommend",
     "stock", "gen",
+    // Commercial suite (blueprint §10 / Phase 9) — native backend only.
+    "license", "print", "project", "errors",
   ] as const;
   const map: Record<string, boolean> = {};
   for (const ns of NAMESPACES) map[ns] = electronShell;
@@ -98,6 +100,13 @@ export const backendCapabilities: Record<string, boolean> = (() => {
     map["stock"] = true; // search/download real; parseSvg runs shared TS here
     map["gen"] = true;
     map["recommend"] = true;
+    // Commercial suite (Phase 9): licensing/print/.album/errors commands live.
+    // Licensing activation needs the env-configured Keygen account; until
+    // then `license.status()` reports reason "not-configured" (honest, typed).
+    map["license"] = true;
+    map["print"] = true;
+    map["project"] = true;
+    map["errors"] = true;
     // Phase 7: auto-update parity with electron-updater — tauri-plugin-updater
     // checks the same GitHub Releases feed; events map to UpdateEvent 1:1.
     map["checkForUpdates"] = true;
@@ -309,6 +318,27 @@ const stubApi: AlbumForgeApi = {
     setApiKey: reject("gen.setApiKey"),
     generate: reject("gen.generate"),
   },
+  // ---- commercial suite (Phase 9) — native backend only; Electron rejects
+  // with an explicit message (tokens never live in the Electron shell). ----
+  license: {
+    status: reject("license.status"),
+    activate: reject("license.activate"),
+    deactivate: reject("license.deactivate"),
+  },
+  print: {
+    quote: reject("print.quote"),
+    payload: reject("print.payload"),
+  },
+  project: {
+    saveAlbumFile: reject("project.saveAlbumFile"),
+    autosave: reject("project.autosave"),
+    recover: reject("project.recover"),
+    clearRecovery: reject("project.clearRecovery"),
+  },
+  errors: {
+    report: reject("errors.report"),
+    lastCrash: reject("errors.lastCrash"),
+  },
 };
 
 /**
@@ -404,6 +434,19 @@ function wireNativeCommands(api: AlbumForgeApi): void {
   api.downloadUpdate = () => native.updates.downloadUpdate();
   api.installUpdate = () => native.updates.installUpdate();
   api.onUpdateEvent = (cb) => native.updates.onUpdateEvent(cb);
+  // Commercial suite (Phase 9) — every call is a typed command; the renderer
+  // only receives verdicts/payloads (keys stay in Rust env/keyring).
+  api.license.status = () => native.license.status();
+  api.license.activate = (key) => native.license.activate(key);
+  api.license.deactivate = () => native.license.deactivate();
+  api.print.quote = (input) => native.print.quote(input);
+  api.print.payload = (layout, spec) => native.print.payload(layout, spec);
+  api.project.saveAlbumFile = (targetPath, layout) => native.project.saveAlbumFile(targetPath, layout);
+  api.project.autosave = (draftId, layout) => native.project.autosave(draftId, layout);
+  api.project.recover = (draftId) => native.project.recover(draftId);
+  api.project.clearRecovery = (draftId) => native.project.clearRecovery(draftId);
+  api.errors.report = (message) => native.errors.report(message);
+  api.errors.lastCrash = () => native.errors.lastCrash();
 }
 
 /** Map the native raw download onto the shared `StockDownloadResult`, parsing
@@ -453,6 +496,29 @@ export async function installBackend(): Promise<void> {
       );
     }
     wireNativeCommands(stubApi);
+    // Phase 9 error pipeline: webview crash hooks → `errors:report` (native
+    // only — the Rust side sanitises paths and forwards to Sentry when a DSN
+    // is configured). Deduplicated per message within a 5 s window so a
+    // repeating rejection can't spam the crash log.
+    if (backendCapabilities.errors) {
+      const lastSent = new Map<string, number>();
+      const report = (message: string) => {
+        const now = Date.now();
+        const prev = lastSent.get(message) ?? 0;
+        if (now - prev < 5_000) return;
+        lastSent.set(message, now);
+        window.albumforge.errors.report(message).catch(() => undefined);
+      };
+      window.addEventListener("error", (e) => {
+        const detail = e.error instanceof Error ? e.error.stack ?? e.error.message : "";
+        report(`window.onerror: ${e.message}${detail ? ` — ${detail.slice(0, 400)}` : ""}`);
+      });
+      window.addEventListener("unhandledrejection", (e) => {
+        const r = e.reason;
+        const msg = r instanceof Error ? `${r.message}${r.stack ? ` — ${r.stack.slice(0, 400)}` : ""}` : String(r);
+        report(`unhandledrejection: ${msg}`);
+      });
+    }
   }
   window.albumforge = stubApi;
   console.info(

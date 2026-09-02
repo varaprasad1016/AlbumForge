@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { AppInfo, UpdateEvent } from "@shared/api";
+import type { AppInfo, LicenseStatus, UpdateEvent } from "@shared/api";
 import { setLang, t, useLang, type Lang } from "../i18n";
 import { useTheme } from "../theme";
 
@@ -16,8 +16,17 @@ export default function SettingsPage() {
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [update, setUpdate] = useState<UpdateStatus>({ phase: "idle" });
   const [cacheCleared, setCacheCleared] = useState(false);
+  const [license, setLicense] = useState<LicenseStatus | null>(null);
+  const [licenseKey, setLicenseKey] = useState("");
+  const [licenseBusy, setLicenseBusy] = useState(false);
+  const [licenseMsg, setLicenseMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const { dark, toggle } = useTheme();
   const lang = useLang();
+
+  useEffect(() => {
+    void refreshLicense();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     window.albumforge.info().then(setInfo);
@@ -57,6 +66,51 @@ export default function SettingsPage() {
     const msg = await window.albumforge.checkForUpdates();
     if (msg.startsWith("Update check failed") || msg.startsWith("Updates are only")) {
       setUpdate({ phase: "error", message: msg });
+    }
+  }
+
+  async function refreshLicense() {
+    try {
+      setLicense(await window.albumforge.license.status());
+      setLicenseMsg(null);
+    } catch (e) {
+      setLicenseMsg({ kind: "err", text: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  async function activateLicense() {
+    if (!licenseKey.trim()) return;
+    setLicenseBusy(true);
+    setLicenseMsg(null);
+    try {
+      const res = await window.albumforge.license.activate(licenseKey.trim());
+      if (res.valid) {
+        setLicenseKey("");
+        setLicenseMsg({
+          kind: "ok",
+          text: `License activated.${res.offlineLease ? " Offline lease armed for 7 days." : " No offline lease returned by Keygen (online validation only)."}`,
+        });
+      } else {
+        setLicenseMsg({ kind: "err", text: `Activation rejected${res.detail ? `: ${String(res.detail)}` : "."}` });
+      }
+      await refreshLicense();
+    } catch (e) {
+      setLicenseMsg({ kind: "err", text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setLicenseBusy(false);
+    }
+  }
+
+  async function deactivateLicense() {
+    setLicenseBusy(true);
+    try {
+      await window.albumforge.license.deactivate();
+      setLicenseMsg({ kind: "ok", text: "Local license lease cleared." });
+      await refreshLicense();
+    } catch (e) {
+      setLicenseMsg({ kind: "err", text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setLicenseBusy(false);
     }
   }
 
@@ -155,6 +209,59 @@ export default function SettingsPage() {
             {update.phase === "uptodate" && <p className="text-emerald-600">{t("settings.uptodate")}</p>}
             {update.phase === "error" && <p className="text-red-600">{update.message}</p>}
           </div>
+        </section>
+
+        <section className="card p-5">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">Licensing</h2>
+          <div className="text-sm">
+            {!license && <p className="text-slate-400">Checking license state…</p>}
+            {license && license.active && (
+              <p className="text-emerald-600">
+                License active
+                {license.expiresAt != null
+                  ? ` — offline lease valid until ${new Date(license.expiresAt * 1000).toLocaleString()} (${Math.max(0, Math.ceil((license.expiresAt * 1000 - Date.now()) / 86_400_000))}d left)`
+                  : ""}
+              </p>
+            )}
+            {license && !license.active && license.reason === "not-configured" && (
+              <p className="text-slate-500">
+                Licensing is not configured on this build (no <code className="rounded bg-slate-100 px-1">ALBUMFORGE_KEYGEN_*</code> environment). The app runs
+                unlicensed — set the environment keys on the native host to enable seat enforcement.
+              </p>
+            )}
+            {license && !license.active && license.reason === "absent" && (
+              <p className="text-slate-500">No license activated yet. Paste a key to activate.</p>
+            )}
+            {license && !license.active && !["absent", "not-configured"].includes(license.reason) && (
+              <p className="text-red-600">
+                License not active — {license.reason}
+                {license.expiresAt != null ? ` (expired ${new Date(license.expiresAt * 1000).toLocaleString()})` : ""}.
+              </p>
+            )}
+          </div>
+          {license && (license.reason === "absent" || license.reason === "not-configured" || !license.active) && (
+            <div className="mt-3 flex items-center gap-2">
+              <input
+                value={licenseKey}
+                onChange={(e) => setLicenseKey(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && activateLicense()}
+                placeholder="License key"
+                disabled={licenseBusy}
+                className="input flex-1"
+              />
+              <button onClick={activateLicense} disabled={licenseBusy || !licenseKey.trim()} className="btn-primary">
+                Activate
+              </button>
+            </div>
+          )}
+          {licenseMsg && (
+            <p className={`mt-2 text-sm ${licenseMsg.kind === "ok" ? "text-emerald-600" : "text-red-600"}`}>{licenseMsg.text}</p>
+          )}
+          {license && license.active && (
+            <button onClick={deactivateLicense} disabled={licenseBusy} className="btn-secondary mt-3">
+              Deactivate on this machine
+            </button>
+          )}
         </section>
 
         <section className="card p-5">

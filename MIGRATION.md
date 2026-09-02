@@ -380,13 +380,75 @@ pure TS module over the spatial grid, WebGL fragment-shader filter pass on
 proxy textures with a CPU fallback, immutable JSON commit model (already the
 data contract). Ships after Phase 7.
 
+### Phase 9 — Commercial suite (SaaS / retail) — *foundation EXECUTED*
+Blueprint §10 owns the architecture; this tracks status. All modules are pure
+Rust + thin commands + typed seam (`license`, `print`, `project`, `errors`
+namespaces on `AlbumForgeApi`; capability flags on; Electron shell rejects by
+design so credentials never live in the legacy shell).
+
+1. [x] **Licensing & seats (`core/license.rs`)** — Keygen `validate` request
+   shape, machine fingerprint (sha-256 host|user, provider-tagged), Ed25519
+   offline signature verify (RFC 8032 vector-tested), 7-day offline lease
+   cache with ordered checks: signature → seat → window; typed verdicts
+   (`active/expired/fingerprint-mismatch/invalid-signature/not-configured/
+   absent`). Commands `license:status/activate/deactivate`.
+2. [x] **Print fulfilment (`core/print.rs`)** — layout JSON → manifest (page
+   count, spread detection, trim/bleed geometry) → structural Prodigi and
+   Gelato order payloads; integer-cents markup/tax quote calculator. Commands
+   `print:quote/payload`.
+3. [x] **`.album` engine + crash recovery (`core/project.rs`)** — zip builder
+   (`layout.json` + embedded `media/<id>-thumb256.jpg`), journaled autosave
+   (`<draft>.recovery`, framed JSON lines, rotation to 20 entries, boot-time
+   `latest()` restore + clear). Commands `project:saveAlbumFile/autosave/
+   recover/clearRecovery`.
+4. [~] **ICC boundary (`core/icc.rs`)** — `ColorSpace` parse, sRGB↔linear
+   gamma, Adobe RGB matrix, CMYK = labs-only refusal; profile embed naming
+   ready for Phase 5 export. **Open:** the `lcms2` C link (non-GNU toolchain
+   only — see risks).
+5. [x] **Error pipeline (`core/errors.rs`)** — Rust panic hook (installed in
+   `lib.rs`), sanitised `crash.log` (user paths stripped, 2 KB cap), optional
+   Sentry envelope forward when `ALBUMFORGE_SENTRY_DSN` is set (plain
+   reqwest, no sentry crate). Commands `errors:report/lastCrash`; webview
+   `window.onerror`/`unhandledrejection` hooks wired in the seam boot hook
+   (deduped, native-only).
+
+**Env keys (injected only):** `ALBUMFORGE_KEYGEN_ACCOUNT`,
+`ALBUMFORGE_KEYGEN_PRODUCT`, `ALBUMFORGE_KEYGEN_BASE_URL`,
+`ALBUMFORGE_KEYGEN_PUBLIC_KEY`, `ALBUMFORGE_SENTRY_DSN`. Print-lab tokens
+follow the `core/secrets.rs` OS-keychain pattern when the transport lands.
+
+**Verification:** 21 new unit tests (lease window/seats, RFC 8032 vectors,
+pricing math, archive round-trip, journal rotation/sanitisation, ICC mapping,
+error sanitisation) — run via the scratch-crate harness under the GNU
+fallback (tauri-linked `cargo test` cannot load there; see risks). `cargo
+check` clean on the GNU toolchain, typecheck/build/101 `npm` tests green.
+Live CDP smoke on the native shell: licensing card (absent state + Activate),
+crash hook writing sanitised `crash.log`, Album tools quote ($70.00 default
+math) + payload review, and the recovery-banner round-trip (journal a variant
+→ reload → “Unsaved changes found” → Restore draft → journal cleared).
+
+**UI wiring (this pass):** seam boot installs the webview crash hooks; Album
+page runs the 60 s journaled autosave tick and the boot-time recovery banner
+(restore/discard); Settings gained the Licensing card (status, activate /
+deactivate); a full-screen `LicenseGate` blocks the app only on real denials
+(`expired`/`fingerprint-mismatch`/`invalid-signature`) with key entry; the
+Album export tab gained the **Album tools** card (.album save-to-file + local
+white-label quote + Prodigi/Gelato payload review).
+
+**Honest boundaries:** live Keygen account arm (validate → signed-lease fetch
+wire contract implemented; the exact signed-file endpoint/header is confirmed
+against the real account during integration), Prodigi/Gelato transport + auth
+(asset URLs arrive with the Phase 5 exporter), lcms2 C-link,
+seat-fingerprint v1 weakness (host|user; MAC/TPM provider is a one-function
+swap).
+
 ## 5. Cross-cutting risks
 
 | Risk | Mitigation |
 |---|---|
 | `sharp`→`image`/`printpdf` feature parity (blend/filters/ICC) | Golden-diff gates in Phase 5; keep Electron exporter until they pass. |
 | Data-dir path change (`%APPDATA%/AlbumForge` vs `com.albumforge.app`) | Copy-on-first-run migration shipped in Phase 3 (both legacy dir names probed); asset scope covers both. |
-| `cargo test` on the GNU+w64devkit Windows fallback | tauri-linked test harness crashes at load (`STATUS_ENTRYPOINT_NOT_FOUND`, WebView2Loader); use `cargo check` there and run `cargo test` under MSVC or Linux (CI keeps `cargo check`). |
+| `cargo test` on the GNU+w64devkit Windows fallback | tauri-linked test harness crashes at load (`STATUS_ENTRYPOINT_NOT_FOUND`, WebView2Loader); use `cargo check` there and run `cargo test` under MSVC or Linux (CI keeps `cargo check`). Phase 9 adds a throwaway scratch-crate harness under `target/` (pure `core` modules only) so the GNU box still executes unit tests. |
 | WebP: `image` 0.25 ships lossless-only; lossy needs C `libwebp` | JPEG q85 proxies (exact Electron parity, see `proxy.rs`); lossy-WebP slot documented in blueprint §7. |
 | Engine TS in webview | Engine is pure & tiny; bundling by Vite is trivial; keep `npm test` as the parity harness. |
 | onnxruntime/ort native size + CI time | Phase 6 decision gate; matte schema unchanged either way. |

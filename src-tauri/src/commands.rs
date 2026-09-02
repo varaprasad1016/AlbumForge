@@ -10,9 +10,13 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::core::db::{self, PhotoListOpts, Project};
+use crate::core::errors;
 use crate::core::export::{self, ExportJobInput, ExportResult};
 use crate::core::fonts;
 use crate::core::gen;
+use crate::core::license;
+use crate::core::print;
+use crate::core::project;
 use crate::core::import::{self, ImportResult};
 use crate::core::library::{
     self, AlbumPage, AlbumVersion, DesignAsset, ExportCreateInput, ExportJob, PageDesign, PageUpdate,
@@ -835,4 +839,253 @@ pub async fn photos_palettes(
 ) -> Result<Vec<palette::PhotoPalette>, String> {
     let cache_dir = app.state::<AppState>().cache_dir.clone();
     with_db(&app, move |conn| palette::sample_palettes(conn, &cache_dir, &photo_ids)).await
+}
+
+/* ===========================================================================
+ * Commercial suite (blueprint §10 / MIGRATION Phase 9) — licensing, print
+ * fulfilment, .album file engine + crash recovery, error reporting.
+ *
+ * Security invariants hold here: every credential (Keygen account/public key,
+ * Sentry DSN, future lab tokens) is read in Rust from the environment or the
+ * OS keychain. The renderer only ever receives verdicts, payloads and file
+ * paths — never keys.
+ * =========================================================================== */
+
+/// `license:status` — evaluate the cached offline lease (signature, seat
+/// binding, 7-day window). Pure local read: never throws for an absent lease,
+/// returns a typed verdict the UI renders.
+#[tauri::command]
+pub fn license_status(app: AppHandle) -> license::LicenseStatus {
+    let data_dir = &app.state::<AppState>().data_dir;
+    let pem = license::keygen_config_from_env().public_key_pem;
+    license::status(data_dir, chrono::Utc::now().timestamp(), pem.as_deref())
+}
+
+/// `license:activate` — Keygen online validation, then cache a signed offline
+/// lease. A lease is only cached when Keygen returns the account-signed
+/// license file (the Ed25519 `Keygen-Signature`); otherwise the validation
+/// verdict is returned without caching — an unsigned state is never trusted
+/// offline (see `core/license.rs`).
+#[tauri::command]
+pub async fn license_activate(app: AppHandle, key: String) -> Result<serde_json::Value, String> {
+    let data_dir = app.state::<AppState>().data_dir.clone();
+    let cfg = license::keygen_config_from_env();
+    let Some(account) = cfg.account.clone() else {
+        return Err("licensing is not configured — set ALBUMFORGE_KEYGEN_ACCOUNT (see MIGRATION.md Phase 9)".into());
+    };
+    let Some(pubkey) = cfg.public_key_pem.clone() else {
+        return Err("licensing is not configured — set ALBUMFORGE_KEYGEN_PUBLIC_KEY (see MIGRATION.md Phase 9)".into());
+    };
+
+    let fingerprint = license::machine_fingerprint();
+    let client = reqwest::Client::new();
+    let validate_url =
+        format!("{}/v1/accounts/{}/licenses/actions/validate", cfg.base_url, account);
+    let resp = client
+        .post(&validate_url)
+        .json(&license::validate_request_body(&key, &fingerprint))
+        .send()
+        .await
+        .map_err(|e| format!("Keygen unreachable: {e}"))?;
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Keygen response unreadable: {e}"))?;
+    let (valid, license_json) = license::parse_validate_response(&body);
+    if !valid {
+        return Ok(serde_json::json!({
+            "valid": false,
+            "detail": body.pointer("/meta/detail").cloned().unwrap_or(serde_json::Value::Null),
+            "offlineLease": false,
+        }));
+    }
+    let Some(license_json) = license_json else {
+        return Ok(serde_json::json!({ "valid": true, "detail": "no license body", "offlineLease": false }));
+    };
+    let license_id = license_json["id"].as_str().unwrap_or("").to_string();
+
+    // Try to arm the offline lease: fetch the account-signed license file.
+    // Keygen returns the Ed25519 signature in the `Keygen-Signature` response
+    // header; accounts that have not enabled offline signing get no header
+    // and simply run without a lease (validated online each launch instead).
+    let signed_url = format!(
+        "{}/v1/accounts/{}/licenses/{}/file",
+        cfg.base_url, account, license_id
+    );
+    let file_resp = client.get(&signed_url).send().await;
+    let leased = match file_resp {
+        Ok(r) if r.status().is_success() => {
+            let sig = r
+                .headers()
+                .get("Keygen-Signature")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_string());
+            let payload = r.text().await.ok();
+            match (sig, payload) {
+                (Some(sig), Some(payload))
+                    if license::verify_ed25519(payload.as_bytes(), &sig, &pubkey) =>
+                {
+                    let record = license::new_lease(
+                        &payload,
+                        &sig,
+                        &license_id,
+                        chrono::Utc::now().timestamp(),
+                    );
+                    license::write_lease(&data_dir, &record).ok();
+                    Some(true)
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    };
+
+    Ok(serde_json::json!({
+        "valid": true,
+        "licenseId": license_id,
+        "offlineLease": leased.unwrap_or(false),
+    }))
+}
+
+/// `license:deactivate` — drop the cached lease (e.g. sign-out / machine
+/// release). The Keygen seat is released server-side by the caller's billing
+/// flow; locally this just forgets the lease.
+#[tauri::command]
+pub fn license_deactivate(app: AppHandle) -> Result<(), String> {
+    let data_dir = &app.state::<AppState>().data_dir;
+    license::clear_lease(data_dir)
+}
+
+/// `print:quote` — white-label pricing calculator (integer minor units).
+#[tauri::command]
+pub fn print_quote(input: print::QuoteInput) -> print::Quote {
+    print::quote(input)
+}
+
+/// `print:payload` — compile a persisted layout JSON into a normalised print
+/// manifest plus the Prodigi and Gelato order payloads (pure; no network).
+/// Asset URLs stay `null` until the Phase 5 export stage uploads the 300 DPI
+/// files.
+#[tauri::command]
+pub fn print_payload(
+    layout: serde_json::Value,
+    spec: print::PrintSpec,
+) -> Result<serde_json::Value, String> {
+    let manifest = print::manifest_from_layout(&layout, &spec)?;
+    let prodigi = print::compile_prodigi_order(&manifest, None, None);
+    let gelato = print::compile_gelato_order(&manifest, None, None);
+    Ok(serde_json::json!({ "manifest": manifest, "prodigi": prodigi, "gelato": gelato }))
+}
+
+/// `project:saveAlbumFile` — package a workspace layout into a portable
+/// `.album` archive: `layout.json` + the proxy thumbnails its elements
+/// reference (read from the native cache dir by photo id).
+#[tauri::command]
+pub async fn project_save_album_file(
+    app: AppHandle,
+    target_path: String,
+    layout: serde_json::Value,
+) -> Result<project::ArchiveSummary, String> {
+    let state = app.state::<AppState>();
+    let cache_dir = state.cache_dir.clone();
+    let out = Path::new(&target_path).to_path_buf();
+    if let Some(parent) = out.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("create target dir: {e}"))?;
+    }
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut media: Vec<(String, Vec<u8>)> = Vec::new();
+        for id in collect_photo_ids(&layout) {
+            let p = cache_dir.join(format!("{id}-thumb256.jpg"));
+            if let Ok(bytes) = std::fs::read(&p) {
+                media.push((format!("{id}-thumb256.jpg"), bytes));
+            }
+        }
+        let refs: Vec<(&str, Vec<u8>)> =
+            media.iter().map(|(n, b)| (n.as_str(), b.clone())).collect();
+        project::build_album_archive(&layout, &refs, &out)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Collect photo ids referenced by an album layout JSON (tolerant walk of
+/// `pages[].elements[].photoId` and `elements[].photoId`).
+fn collect_photo_ids(value: &serde_json::Value) -> std::collections::BTreeSet<String> {
+    use std::collections::BTreeSet;
+    let mut out = BTreeSet::new();
+    fn walk(v: &serde_json::Value, out: &mut BTreeSet<String>) {
+        match v {
+            serde_json::Value::Array(items) => {
+                for it in items {
+                    walk(it, out);
+                }
+            }
+            serde_json::Value::Object(map) => {
+                for (k, val) in map {
+                    if (k == "photoId" || k == "photo_id") && val.is_string() {
+                        if let Some(s) = val.as_str() {
+                            if !s.is_empty() {
+                                out.insert(s.to_string());
+                            }
+                        }
+                    } else {
+                        walk(val, out);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    walk(value, &mut out);
+    out
+}
+
+/// `project:autosave` — append a layout snapshot to the draft's recovery
+/// journal (the caller schedules the 60 s tick; this is the storage layer).
+#[tauri::command]
+pub fn project_autosave(
+    app: AppHandle,
+    draft_id: String,
+    layout: serde_json::Value,
+) -> Result<(), String> {
+    let data_dir = &app.state::<AppState>().data_dir;
+    let journal = project::RecoveryJournal::new(data_dir.join("recovery"));
+    journal.write_snapshot(&draft_id, &layout)
+}
+
+/// `project:recover` — newest uncommitted snapshot for a draft, if any (boot
+/// hook after an unexpected exit).
+#[tauri::command]
+pub fn project_recover(
+    app: AppHandle,
+    draft_id: String,
+) -> Result<Option<serde_json::Value>, String> {
+    let data_dir = &app.state::<AppState>().data_dir;
+    let journal = project::RecoveryJournal::new(data_dir.join("recovery"));
+    Ok(journal.latest(&draft_id))
+}
+
+/// `project:clearRecovery` — drop the shadow file after a successful restore.
+#[tauri::command]
+pub fn project_clear_recovery(app: AppHandle, draft_id: String) -> Result<(), String> {
+    let data_dir = &app.state::<AppState>().data_dir;
+    let journal = project::RecoveryJournal::new(data_dir.join("recovery"));
+    journal.clear(&draft_id)
+}
+
+/// `errors:report` — renderer crash/error hook target (`window.onerror` /
+/// `unhandledrejection`); appends sanitised entry + optional Sentry forward.
+#[tauri::command]
+pub fn errors_report(app: AppHandle, message: String) -> Result<(), String> {
+    let data_dir = &app.state::<AppState>().data_dir;
+    errors::report(data_dir, &message);
+    Ok(())
+}
+
+/// `errors:lastCrash` — most recent sanitised crash entry (empty = clean).
+#[tauri::command]
+pub fn errors_last_crash(app: AppHandle) -> Result<Option<String>, String> {
+    let data_dir = &app.state::<AppState>().data_dir;
+    Ok(errors::last_crash(data_dir))
 }

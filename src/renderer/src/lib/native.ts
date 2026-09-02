@@ -111,6 +111,12 @@ import type {
   Project,
   StockDownloadInput,
   StockSearchResult,
+  ArchiveSummary,
+  LicenseActivateResult,
+  LicenseStatus,
+  PrintQuote,
+  PrintQuoteInput,
+  PrintSpec,
   TemplateDetail,
   TemplateSummary,
   UpdateEvent,
@@ -606,6 +612,57 @@ export const native = {
     downloadUpdate,
     installUpdate,
     onUpdateEvent,
+  },
+
+  /* ---- commercial suite (blueprint §10 / MIGRATION Phase 9) ---- */
+
+  license: {
+    /** Pure local verdict — signature, seat binding, 7-day offline window. */
+    status(): Promise<LicenseStatus> {
+      return invoke<LicenseStatus>("license_status");
+    },
+    activate(key: string): Promise<LicenseActivateResult> {
+      return invoke<LicenseActivateResult>("license_activate", { key });
+    },
+    deactivate(): Promise<void> {
+      return invoke<void>("license_deactivate");
+    },
+  },
+
+  print: {
+    quote(input: PrintQuoteInput): Promise<PrintQuote> {
+      return invoke<PrintQuote>("print_quote", { input });
+    },
+    payload(
+      layout: unknown,
+      spec: PrintSpec,
+    ): Promise<{ manifest: unknown; prodigi: unknown; gelato: unknown }> {
+      return invoke("print_payload", { layout, spec });
+    },
+  },
+
+  project: {
+    saveAlbumFile(targetPath: string, layout: unknown): Promise<ArchiveSummary> {
+      return invoke<ArchiveSummary>("project_save_album_file", { targetPath, layout });
+    },
+    autosave(draftId: string, layout: unknown): Promise<void> {
+      return invoke<void>("project_autosave", { draftId, layout });
+    },
+    recover(draftId: string): Promise<unknown | null> {
+      return invoke<unknown | null>("project_recover", { draftId });
+    },
+    clearRecovery(draftId: string): Promise<void> {
+      return invoke<void>("project_clear_recovery", { draftId });
+    },
+  },
+
+  errors: {
+    report(message: string): Promise<void> {
+      return invoke<void>("errors_report", { message });
+    },
+    lastCrash(): Promise<string | null> {
+      return invoke<string | null>("errors_last_crash");
+    },
   },
 };
 
