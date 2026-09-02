@@ -361,6 +361,8 @@ adopted Electron studio).
    installer/feed is published (safe: no native installs are live yet).
    macOS/Linux native bundles stay behind the cutover gate (Electron covers
    those channels meanwhile).
+   Status: secrets configured (Sep 2026) — the release that follows this
+   note carries the first signed native installer + feed.
 2. Android/mobile (`mobile/`) is a separate Capacitor stack — untouched.
 3. **Cutover gate checklist:** native backend = default shell for 1+ patch
    releases behind the same installer channel; Electron installer still
