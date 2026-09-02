@@ -1,6 +1,6 @@
 [package]
 name = "albumforge"
-version = "0.10.17"
+version = "0.10.18"
 description = "AlbumForge native backend (Tauri 2 / Rust) — asset scanning, editor proxies, 300 DPI export"
 authors = ["Vara"]
 edition = "2021"
