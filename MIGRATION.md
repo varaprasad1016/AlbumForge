@@ -361,8 +361,11 @@ adopted Electron studio).
    installer/feed is published (safe: no native installs are live yet).
    macOS/Linux native bundles stay behind the cutover gate (Electron covers
    those channels meanwhile).
-   Status: secrets configured (Sep 2026) — the release that follows this
-   note carries the first signed native installer + feed.
+   Status: secrets configured (Sep 2026). v0.10.16 published the first
+   signed native installer (`AlbumForge_<ver>_x64-setup.exe` + `.sig` +
+   `tauri-update.json` on the same v* release as the Electron installer) and
+   the feed was verified live. On-device round-trip (install → update) ran
+   against v0.10.16 → v0.10.17.
 2. Android/mobile (`mobile/`) is a separate Capacitor stack — untouched.
 3. **Cutover gate checklist:** native backend = default shell for 1+ patch
    releases behind the same installer channel; Electron installer still
