@@ -4,11 +4,6 @@ Automatically turn thousands of finished photographs into professionally laid-ou
 albums — in minutes, not hours. **AlbumForge is a local Windows desktop application.** Your
 photos never leave your machine: no cloud, no accounts, no uploads.
 
-> AlbumForge is **not** a photo editor. No filters, brushes, curves, retouching, RAW editing,
-> or generative tools. Your photographs are already finished; AlbumForge solves the
-> composition problem — turning 3,000–5,000+ finished images into preset collage album
-> templates automatically.
-
 ## What it does
 
 1. Create a project (e.g. "Wedding — John & Sarah").
