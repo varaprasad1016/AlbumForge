@@ -300,18 +300,53 @@ adopted Electron studio).
    system fonts until then).
 
 ### Phase 5 — Export parity (headless 300/600 DPI)
-`core/export.rs` grows from WIP to the print pipeline:
-1. Raster spread composite with `image`: same primitive math as `export.ts`
-   (normalized coords, crops, blend whitelist, filters, matte `dest-in`),
-   originals + embedded profiles loaded only at export.
-2. PDF/X-4 assembly (`printpdf`), TrimBox/BleedBox/MediaBox parity, per-spread
-   CMYK TIFF manifest (parity target with the current sharp/pdf-lib exporter).
-3. **Golden-diff acceptance:** same album exported via Electron (sharp) and
-   native; pixel/perceptual-hash diff under threshold across lab presets.
-   Until parity gates pass, release builds keep the Electron exporter behind a
-   feature flag.
-4. **DoD:** `exports:create` native path returns a PDF that passes the golden
-   diff; `cargo test` covers crop/filter matrix.
+`core/export.rs` grew from WIP to the real print pipeline (**this pass**):
+1. [x] **Raster engine** — real album-layout input (DB-shaped pages: spread
+   `layoutKey`, background colour, per-element crop/text/style) with the same
+   primitive math as `export.ts`: normalised coords, bleed extension on
+   page-touching edges only, spread canvases sliced at the fold (fold edge
+   never bleeds), image pipeline crop → multiplier filters
+   (`brightness/contrast/saturation/hue` via the canonical matrix, `blur`) →
+   rotate → cover/fill resize, alpha matte `dest-in` from `subject_mattes`,
+   blend modes multiply/screen/overlay/soft-light, JPEG q95 output. Text
+   elements render with `fontdue` from the bundled `$RESOURCE/fonts` TTFs;
+   proof exports raster a diagonal watermark. Per-physical-page JPEGs land in
+   `pages/` with Electron naming (`page-NNN.jpg`, `-left/-right.jpg`).
+2. [x] **PDF assembly** — `core/pdf.rs` (lopdf, chosen over printpdf for a
+   small, fully-controlled object graph + raw DCTDecode JPEG passthrough):
+   MediaBox/BleedBox/TrimBox parity, one PDF page per *physical* page, and a
+   PDF/X-4 `/GTS_PDFX` OutputIntent when the OS ships an sRGB profile
+   (Windows `spool/drivers/color`, macOS ColorSync, Linux colord) — plus XMP
+   marking. Without a profile the boxes still hold; only the intent is
+   omitted (reported in the outcome). Per-spread CMYK TIFF manifest stays a
+   later slice (colour conversion itself is gated on the `lcms2`/ICC work,
+   Phase 9 `core/icc.rs`).
+3. [x] **Runner** — `exports:create` now runs the job in the background
+   (snapshot DB → release lock → render → re-lock): queued →
+   completed(filePath) / failed(error) exactly like Electron's `runExport`.
+   `lab_package` writes into the chosen folder; PDF kinds write to the chosen
+   file. Font dirs resolve from `$RESOURCE/fonts` + `data_dir/fonts`.
+4. **Golden-diff acceptance (open):** same album exported via Electron
+   (sharp) and native; pixel/perceptual-hash diff under threshold across lab
+   presets. Until parity gates pass, release builds keep the Electron
+   exporter behind a feature flag. **E2E verified on the native shell over
+   CDP:** lab package of a 12×12 in album (4 pages → PDF + `manifest.txt` +
+   4 page JPEGs, pdf-lib parses 4 pages, page-0 media box = trim + 2×bleed,
+   `/OutputIntents` + `GTS_PDFX` bytes present), a 3-page album with 1 spread
+   (→ 4 physical PDF pages, left/right halves), `highres_pdf` to an explicit
+   target file, and `proof_pdf` (watermark) — all jobs `completed`.
+5. **Honest boundaries (this slice):** shape/graphic/stock elements are
+   counted and skipped with a manifest note (full parity needs an SVG
+   rasteriser or a second render pass — Electron keeps those vectors out of
+   the PDF too, so rasterising them is deferred); text is rasterised (not
+   vector) so glyphs come from fontdue, not the PDF text layer; EXIF
+   orientation is not auto-applied; originals decode via the `image` crate
+   (jpeg/png/webp — TIFF/HEIC/RAW originals need the Phase 5b decoder work).
+6. **DoD (partial):** `exports:create` native path returns a PDF with correct
+   page geometry (verified via pdf-lib E2E); `cargo test` crop/filter/box
+   matrix covered by 7 new unit tests (scratch-harness run, since the GNU
+   toolchain cannot load the tauri-linked test binary). The golden-diff gate
+   itself is item 4 above.
 
 ### Phase 6 — AI/network services relocation (recommend / stock / gen / segment)
 1. [x] **HTTP providers** — landed early via the Phase-4 pull-forward pass:

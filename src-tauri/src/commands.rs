@@ -2,7 +2,7 @@
 //! `core::*`, emit progress events. The renderer calls these exclusively
 //! through `src/renderer/src/lib/native.ts` — never via raw IPC strings.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -382,21 +382,268 @@ pub async fn photos_records(
 
 /* ---- Exports / designs / proofs (parity with Electron IPC) ---- */
 
-/// `exports:create` parity — persist the queued job row. Completion needs the
-/// Phase 5 native export runner (`core/export.rs`); Electron's in-process
-/// `runExport` (sharp/pdf-lib) cannot execute here.
+/// `exports:create` parity — persist the queued job row, then fire the Phase 5
+/// native runner in the background: queued → running → completed(filePath) /
+/// failed(error). The renderer polls `exports:get` exactly like Electron.
 #[tauri::command]
 pub async fn exports_create(
     app: AppHandle,
     album_id: String,
     input: ExportCreateInput,
 ) -> Result<ExportJob, String> {
-    with_db(&app, move |conn| library::create_export_job(conn, &album_id, &input)).await
+    let target = input.target_path.clone();
+    let id = {
+        let album_id = album_id.clone();
+        let input = input.clone();
+        with_db(&app, move |conn| library::create_export_job(conn, &album_id, &input)).await?
+    };
+    let job_id = id.id.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = run_export_job(app.clone(), album_id, job_id.clone(), target).await {
+            // Surface render failures on the job row (Electron `runExport`
+            // catch parity) instead of leaving it queued forever.
+            let db = app.state::<AppState>().db.clone();
+            let _ = tauri::async_runtime::spawn_blocking(move || {
+                let conn = db.lock().map_err(|e| e.to_string())?;
+                library::update_export_job(&conn, &job_id, "failed", None, Some(&e))
+            })
+            .await;
+        }
+    });
+    Ok(id)
 }
 
 #[tauri::command]
 pub async fn exports_get(app: AppHandle, id: String) -> Result<ExportJob, String> {
     with_db(&app, move |conn| library::get_export_job(conn, &id)).await
+}
+
+/// Everything the runner needs, loaded from the DB in one locked scope so the
+/// long render never holds the shared connection.
+struct ExportSnapshot {
+    kind: String,
+    target_path: Option<String>,
+    dpi: u32,
+    bleed_mm: f64,
+    color_mode: String,
+    album: export::AlbumExport,
+    sources: export::RenderSources,
+    font_dirs: Vec<PathBuf>,
+}
+
+/// Phase 5 background runner — Electron `runExport` parity.
+///
+/// 1. Snapshot the job settings, album pages and the original-source maps
+///    (photos/mattes) under the DB lock; release it before rendering.
+/// 2. Render + assemble the package on a blocking thread (300 DPI, spreads,
+///    bleed, PDF/X-4 intent when an sRGB profile is on the host).
+/// 3. Re-lock to persist `completed(file_path)` or `failed(error)`.
+async fn run_export_job(
+    app: AppHandle,
+    album_id: String,
+    export_id: String,
+    target_path: Option<String>,
+) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let db = state.db.clone();
+    let data_dir = state.data_dir.clone();
+
+    // 1 — snapshot (short locked scope).
+    let mut font_dirs: Vec<PathBuf> = Vec::new();
+    if let Ok(res) = app.path().resource_dir() {
+        font_dirs.push(res.join("fonts"));
+    }
+    font_dirs.push(data_dir.join("fonts"));
+
+    let loaded = {
+        let db = db.clone();
+        let album_id = album_id.clone();
+        let export_id = export_id.clone();
+        tauri::async_runtime::spawn_blocking(move || -> Result<Option<ExportSnapshot>, String> {
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            let job = library::get_export_job(&conn, &export_id)?;
+            if job.status != "queued" {
+                return Ok(None); // already completed/failed (or cancelled)
+            }
+            let settings = library::export_job_settings(&conn, &export_id)?.ok_or("export job has no settings")?;
+            let album_row = library::album_by_id(&conn, &album_id)?;
+            let pages = library::album_pages(&conn, &album_id)?;
+
+            let (w_mm, h_mm) = if album_row.page_size.unit == "in" {
+                (
+                    album_row.page_size.width * 25.4,
+                    album_row.page_size.height * 25.4,
+                )
+            } else {
+                (album_row.page_size.width, album_row.page_size.height)
+            };
+
+            let mut photo_ids: Vec<String> = Vec::new();
+            let mut album_pages: Vec<export::AlbumPageDef> = Vec::new();
+            for p in &pages {
+                let elements: Vec<export::AlbumElementDef> = p
+                    .elements
+                    .iter()
+                    .map(|el| export::AlbumElementDef {
+                        kind: el.el_type.clone(),
+                        z: el.z,
+                        x: el.x,
+                        y: el.y,
+                        width: el.width,
+                        height: el.height,
+                        rotation: el.rotation,
+                        photo_id: el.photo_id.clone(),
+                        crop: el.crop.clone(),
+                        text: el.text.clone(),
+                        style: el.style.clone(),
+                    })
+                    .collect();
+                for el in &p.elements {
+                    if let Some(pid) = &el.photo_id {
+                        if !photo_ids.contains(pid) {
+                            photo_ids.push(pid.clone());
+                        }
+                    }
+                }
+                album_pages.push(export::AlbumPageDef {
+                    id: p.id.clone(),
+                    layout_key: p.layout_key.clone(),
+                    background: p.background.clone(),
+                    elements,
+                });
+            }
+
+            let mut sources = export::RenderSources::default();
+            if !photo_ids.is_empty() {
+                let marks: Vec<String> = photo_ids.iter().map(|_| "?".to_string()).collect();
+                let sql = format!(
+                    "SELECT id, file_path, width, height FROM photos WHERE id IN ({})",
+                    marks.join(",")
+                );
+                let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+                let mut rows = stmt
+                    .query(rusqlite::params_from_iter(photo_ids.iter()))
+                    .map_err(|e| e.to_string())?;
+                while let Some(r) = rows.next().map_err(|e| e.to_string())? {
+                    let id: String = r.get(0).map_err(|e| e.to_string())?;
+                    let path: String = r.get(1).map_err(|e| e.to_string())?;
+                    let width: i64 = r.get::<_, Option<i64>>(2).map_err(|e| e.to_string())?.unwrap_or(0);
+                    let height: i64 = r.get::<_, Option<i64>>(3).map_err(|e| e.to_string())?.unwrap_or(0);
+                    sources.photos.insert(
+                        id,
+                        export::PhotoSource {
+                            path,
+                            width: width.clamp(1, i32::MAX as i64) as u32,
+                            height: height.clamp(1, i32::MAX as i64) as u32,
+                        },
+                    );
+                }
+                let matte_sql = format!(
+                    "SELECT photo_id, matte_path FROM subject_mattes WHERE photo_id IN ({})",
+                    marks.join(",")
+                );
+                let mut mstmt = conn.prepare(&matte_sql).map_err(|e| e.to_string())?;
+                let mut mrows = mstmt
+                    .query(rusqlite::params_from_iter(photo_ids.iter()))
+                    .map_err(|e| e.to_string())?;
+                while let Some(r) = mrows.next().map_err(|e| e.to_string())? {
+                    let id: String = r.get(0).map_err(|e| e.to_string())?;
+                    let path: String = r.get(1).map_err(|e| e.to_string())?;
+                    sources.mattes.insert(id, path);
+                }
+            }
+
+            let dpi = settings["dpi"].as_f64().unwrap_or(300.0);
+            let color_mode = settings["colorMode"].as_str().unwrap_or("rgb").to_string();
+            Ok(Some(ExportSnapshot {
+                kind: job.kind.clone(),
+                target_path,
+                dpi: dpi.clamp(72.0, 2400.0) as u32,
+                bleed_mm: settings["bleedMm"].as_f64().unwrap_or(3.0),
+                color_mode,
+                album: export::AlbumExport {
+                    name: album_row.name.clone(),
+                    width_mm: w_mm,
+                    height_mm: h_mm,
+                    pages: album_pages,
+                },
+                sources,
+                font_dirs,
+            }))
+        })
+        .await
+        .map_err(|e| e.to_string())??
+    };
+
+    let Some(snap) = loaded else { return Ok(()) };
+
+    // 2 — render + assemble off the DB and off the async runtime.
+    let opts = export::ExportOptions {
+        dpi: snap.dpi,
+        bleed_mm: snap.bleed_mm,
+        color_mode: snap.color_mode.clone(),
+        watermark: if snap.kind == "proof_pdf" { Some("PROOF".to_string()) } else { None },
+        font_dirs: snap.font_dirs.clone(),
+        lab_package: snap.kind == "lab_package",
+    };
+    let exports_dir = data_dir.join("exports");
+    let target = snap.target_path.clone();
+    let is_lab = snap.kind == "lab_package";
+
+    // Lab packages write straight into the chosen folder (Electron
+    // `writeLabPackage` parity); PDF exports render into a staging dir and the
+    // final PDF is copied to the chosen file (or kept in the staging dir).
+    let render_dir: PathBuf = if is_lab {
+        match &target {
+            Some(t) if !t.trim().is_empty() => PathBuf::from(t),
+            _ => exports_dir.join(format!("album-{album_id}")),
+        }
+    } else {
+        exports_dir.join(format!("job-{export_id}"))
+    };
+
+    let outcome = {
+        let album = snap.album.clone();
+        let sources = snap.sources.clone();
+        let dir = render_dir.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            export::run_export_package(&album, &opts, &sources, &dir)
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    }?;
+
+    let file_path: String = if is_lab {
+        render_dir.display().to_string()
+    } else {
+        let staged_pdf = PathBuf::from(&outcome.pdf_path);
+        match &target {
+            Some(t) if !t.trim().is_empty() => {
+                let dest = PathBuf::from(t);
+                if let Some(parent) = dest.parent() {
+                    std::fs::create_dir_all(parent).map_err(|e| format!("create target dir: {e}"))?;
+                }
+                std::fs::copy(&staged_pdf, &dest)
+                    .map_err(|e| format!("copy pdf to target: {e}"))?;
+                std::fs::remove_dir_all(&render_dir).ok();
+                dest.display().to_string()
+            }
+            _ => staged_pdf.display().to_string(),
+        }
+    };
+
+    // 3 — persist completion.
+    {
+        let db = db.clone();
+        let fp = file_path.clone();
+        tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            library::update_export_job(&conn, &export_id, "completed", Some(&fp), None)
+        })
+        .await
+        .map_err(|e| e.to_string())??
+    }
+    Ok(())
 }
 
 #[tauri::command]

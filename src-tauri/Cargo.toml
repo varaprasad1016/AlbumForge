@@ -56,8 +56,14 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 sha2 = "0.10"
 
-# NOTE: printpdf / tiff land here when the PDF/TIFF assembly step of the
-# export engine is implemented (see src/core/export.rs).
+# Phase 5 print pipeline (all pure-Rust for the GNU/w64devkit toolchain):
+#  - lopdf: PDF assembly — Media/Trim/Bleed boxes, JPEG DCTDecode passthrough
+#    XObjects, optional PDF/X-4 OutputIntent when an sRGB profile is found on
+#    the host (see core/pdf.rs).
+#  - fontdue: glyph rasterization for text elements + proof watermarks (the
+#    bundled $RESOURCE/fonts TTFs are parsed directly — no system font mgr).
+lopdf = "0.44"
+fontdue = "0.9"
 
 [profile.release]
 codegen-units = 1

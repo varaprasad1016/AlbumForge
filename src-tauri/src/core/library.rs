@@ -1274,6 +1274,31 @@ pub fn get_export_job(conn: &Connection, id: &str) -> Result<ExportJob, String> 
     export_job_by_id(conn, id)
 }
 
+/// Raw `settings` JSON of an export job (the Phase 5 runner reads dpi/bleed/
+/// colorMode from it without re-deriving the Electron handler's shape).
+pub fn export_job_settings(conn: &Connection, id: &str) -> Result<Option<Value>, String> {
+    let raw: Option<String> = conn
+        .query_row("SELECT settings FROM exports WHERE id = ?", params![id], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    Ok(raw.and_then(|s| serde_json::from_str(&s).ok()))
+}
+
+/// Phase 5 runner status write-back: `completed(file_path)` / `failed(error)`.
+pub fn update_export_job(
+    conn: &Connection,
+    id: &str,
+    status: &str,
+    file_path: Option<&str>,
+    error: Option<&str>,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE exports SET status = ?1, file_path = ?2, error = ?3 WHERE id = ?4",
+        params![status, file_path, error, id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /* ---------- Album generation persistence (Phase 4 item 3) ---------- */
 
 /// A composed page produced by the engine (`PageDef` in `engine/types.ts`).
