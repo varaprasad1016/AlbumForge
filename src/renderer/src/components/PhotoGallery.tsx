@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FixedSizeGrid } from "react-window";
 import type { Photo } from "@shared/api";
+import { mediaUrl } from "../lib/backend";
+import { fallbackToPlaceholder } from "../lib/imageFallback";
 
 const CELL = 156;
 const GAP = 8;
@@ -40,11 +42,12 @@ function PhotoCell({
         }`}
       >
         <img
-          src={`media://thumb256/${photo.id}`}
+          src={mediaUrl(photo.id, "thumb256")}
           alt={photo.filename}
           loading="lazy"
           draggable={false}
           className="h-full w-full object-cover"
+          onError={fallbackToPlaceholder}
         />
         {selected && (
           <div className="absolute left-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-brand text-xs text-white">

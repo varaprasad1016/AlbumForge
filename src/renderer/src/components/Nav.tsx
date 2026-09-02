@@ -1,3 +1,4 @@
+import { backendBadge } from "../lib/backend";
 import { t, useLang } from "../i18n";
 import { useTheme } from "../theme";
 
@@ -83,6 +84,13 @@ export default function Nav() {
       </nav>
 
       <div className="space-y-3 border-t border-slate-200/60 p-4">
+        <div
+          title={backendBadge.hint}
+          className="flex items-center justify-center gap-1.5 rounded-lg bg-slate-50/80 px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400"
+        >
+          <span className={`h-1.5 w-1.5 rounded-full ${backendBadge.dot}`} />
+          {backendBadge.text}
+        </div>
         <button
           onClick={toggle}
           className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:border-slate-300"

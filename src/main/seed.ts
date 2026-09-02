@@ -1,5 +1,5 @@
 /** Template seed data — five families referencing the layout catalogue. */
-import { LAYOUT_CATALOG } from "./engine/layouts";
+import { LAYOUT_CATALOG } from "../shared/engine/layouts";
 import { DB, newId, now } from "./db";
 
 export interface TemplateFamilySeed {

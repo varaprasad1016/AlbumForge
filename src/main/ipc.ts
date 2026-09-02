@@ -8,9 +8,9 @@ import { analyzeImage, extractGps, extractTimestamp, generateThumbnails, imageIn
 import { buildPdf, ExportPage, MatteResolver, PhotoResolver, StockResolver, writeLabPackage } from "./export";
 import { buildProofGallery, importFeedback, photoNotes } from "./proofing";
 import { albumById, generateAndPersist, pageAspect, photoRecordById, photoRecordsFor } from "./generate";
-import { composePage } from "./engine/layoutEngine";
-import { isSpreadLayout, LAYOUT_CATALOG } from "./engine/layouts";
-import { segmentByTime } from "./engine/grouping";
+import { composePage } from "../shared/engine/layoutEngine";
+import { isSpreadLayout, LAYOUT_CATALOG } from "../shared/engine/layouts";
+import { segmentByTime } from "../shared/engine/grouping";
 import { listFonts, readFont } from "./fonts";
 import { hasMatte, mattePath, segmentPhoto } from "./segment";
 import { suggestForPhotos } from "./recommend";

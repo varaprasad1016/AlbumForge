@@ -2,8 +2,10 @@
 //!
 //! Walks a folder, reads EXIF/metadata with `kamadak-exif`, reads pixel
 //! dimensions from image headers (no full decode), and returns a lightweight
-//! JSON-friendly vector. The walk is parallelised with `rayon`, so a folder
-//! of 5,000 images is indexed in milliseconds.
+//! JSON-friendly vector. All metadata — EXIF timestamps, camera metrics
+//! (make/model/ISO), GPS and pixel ratios — is parsed in native code; the
+//! walk is parallelised with `rayon`, so a folder of 5,000 images is
+//! indexed in milliseconds without ever touching the UI thread.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -27,6 +29,11 @@ pub struct ScannedPhoto {
     pub file_size: u64,
     /// EXIF DateTimeOriginal, ISO-8601 when available.
     pub taken_at: Option<String>,
+    /// Camera make/model (IFD0 Make/Model tags), for gear-based grouping.
+    pub camera_make: Option<String>,
+    pub camera_model: Option<String>,
+    /// EXIF PhotographicSensitivity (ISO).
+    pub iso: Option<u32>,
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
 }
@@ -76,7 +83,7 @@ pub fn scan_directory(
             let n = done.fetch_add(1, Ordering::Relaxed) + 1;
             on_progress(n, total);
         })
-        .filter_map(|p| inspect(p))
+        .filter_map(|p| inspect_photo(p))
         .collect();
 
     // Chronological grouping (smart-album source order); untimed photos last.
@@ -86,7 +93,10 @@ pub fn scan_directory(
     Ok(photos)
 }
 
-fn inspect(path: &Path) -> Option<ScannedPhoto> {
+/// Read metadata for a single image file (EXIF optional — never fails the
+/// scan on corrupt blocks). Public so the import pipeline reuses the exact
+/// same native parse for rows and cache keys.
+pub fn inspect_photo(path: &Path) -> Option<ScannedPhoto> {
     let meta = std::fs::metadata(path).ok()?;
     let (width, height) = image::image_dimensions(path).ok()?;
     let filename = path.file_name()?.to_string_lossy().into_owned();
@@ -99,6 +109,9 @@ fn inspect(path: &Path) -> Option<ScannedPhoto> {
         orientation: 1,
         file_size: meta.len(),
         taken_at: None,
+        camera_make: None,
+        camera_model: None,
+        iso: None,
         latitude: None,
         longitude: None,
     };
@@ -107,6 +120,9 @@ fn inspect(path: &Path) -> Option<ScannedPhoto> {
     if let Some(exif) = read_exif(path) {
         photo.taken_at = field_string(&exif, exif::Tag::DateTimeOriginal);
         photo.orientation = field_u16(&exif, exif::Tag::Orientation).unwrap_or(1);
+        photo.camera_make = field_string(&exif, exif::Tag::Make);
+        photo.camera_model = field_string(&exif, exif::Tag::Model);
+        photo.iso = field_u32(&exif, exif::Tag::PhotographicSensitivity);
         photo.latitude = gps_degrees(&exif, exif::Tag::GPSLatitude, exif::Tag::GPSLatitudeRef);
         photo.longitude = gps_degrees(&exif, exif::Tag::GPSLongitude, exif::Tag::GPSLongitudeRef);
     }
@@ -135,6 +151,16 @@ fn field_string(exif: &exif::Exif, tag: exif::Tag) -> Option<String> {
 fn field_u16(exif: &exif::Exif, tag: exif::Tag) -> Option<u16> {
     exif.get_field(tag, exif::In::PRIMARY).and_then(|f| match f.value {
         exif::Value::Short(ref v) => v.first().copied(),
+        _ => None,
+    })
+}
+
+/// Read an unsigned tag tolerant of the Short/Long encodings different
+/// camera vendors write (ISO is often Short, occasionally Long).
+fn field_u32(exif: &exif::Exif, tag: exif::Tag) -> Option<u32> {
+    exif.get_field(tag, exif::In::PRIMARY).and_then(|f| match f.value {
+        exif::Value::Short(ref v) => v.first().map(|x| u32::from(*x)),
+        exif::Value::Long(ref v) => v.first().copied(),
         _ => None,
     })
 }

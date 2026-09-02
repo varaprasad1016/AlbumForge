@@ -1,0 +1,12 @@
+# Scoped to the src-tauri package. Nothing here affects the MSVC/default
+# toolchain or other platforms.
+#
+# Why: Tauri's lib crate is `staticlib + cdylib + rlib` (mobile glue needs the
+# cdylib). When the Rust backend is built with the GNU fallback toolchain
+# (bare Windows without MSVC Build Tools, see scripts/setup-native.mjs),
+# w64devkit's GNU ld overflows while auto-exporting the cdylib's ~112k-symbol
+# table ("export ordinal too large"). Disabling auto-export on windows-gnu is
+# safe: nothing imports the cdylib on Windows — mobile targets link it with
+# their own (non-GNU) toolchains.
+[target.x86_64-pc-windows-gnu]
+rustflags = ["-C", "link-arg=-Wl,--exclude-all-symbols"]

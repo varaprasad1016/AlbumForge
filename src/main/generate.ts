@@ -1,8 +1,8 @@
 /** Generation orchestration: DB ↔ engine bridge + persistence. */
 import { DB, newId, now } from "./db";
-import { generateAlbum } from "./engine/generator";
-import { selectForMode } from "./engine/selection";
-import { PageStyle, PhotoRecord, TemplateFamily } from "./engine/types";
+import { generateAlbum } from "../shared/engine/generator";
+import { selectForMode } from "../shared/engine/selection";
+import { PageStyle, PhotoRecord, TemplateFamily } from "../shared/engine/types";
 import type { Album, GenerateInput, PageSize } from "@shared/api";
 
 const MM_PER_INCH = 25.4;

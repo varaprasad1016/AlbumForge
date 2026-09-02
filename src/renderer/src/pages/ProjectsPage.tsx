@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Project } from "@shared/api";
+import { mediaUrl } from "../lib/backend";
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -104,7 +105,7 @@ export default function ProjectsPage() {
                     </div>
                     {p.thumbnailPhotoId && (
                       <img
-                        src={`media://preview1024/${p.thumbnailPhotoId}`}
+                        src={mediaUrl(p.thumbnailPhotoId, "preview1024")}
                         alt={p.name}
                         draggable={false}
                         className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"

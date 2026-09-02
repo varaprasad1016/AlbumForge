@@ -4,7 +4,7 @@ import sharp from "sharp";
 import { PDFDocument, StandardFonts, degrees, rgb } from "pdf-lib";
 import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
-import { isSpreadLayout } from "./engine/layouts";
+import { isSpreadLayout } from "../shared/engine/layouts";
 import { backgroundCanvasSvg } from "../shared/patterns";
 import { graphicSvg, shapeSvg, type GraphicStyle, type ShapeStyle } from "../shared/designs";
 import type { StockVectorData } from "@shared/api";

@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Photo } from "@shared/api";
+import { mediaUrl } from "../lib/backend";
+import { fallbackToPlaceholder } from "../lib/imageFallback";
 
 export default function PhotoPicker({
   projectId,
@@ -60,10 +62,11 @@ export default function PhotoPicker({
               title={p.filename}
             >
               <img
-                src={`media://thumb256/${p.id}`}
+                src={mediaUrl(p.id, "thumb256")}
                 alt={p.filename}
                 className="h-full w-full object-cover"
                 draggable={false}
+                onError={fallbackToPlaceholder}
               />
             </button>
           ))}

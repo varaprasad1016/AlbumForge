@@ -11,15 +11,16 @@ layer that talks to these modules through typed commands
 | `src/main.rs` | Thin entry point | `src/main/index.ts` (partially) |
 | `src/lib.rs` | Builder, `AppState`, command registration | `src/main/ipc.ts` wiring |
 | `src/commands.rs` | Typed IPC surface, progress events | `src/main/ipc.ts` handlers |
-| `src/core/scanner.rs` | Rayon-parallel folder scan + EXIF/GPS | `exifr` + import loop |
-| `src/core/proxy.rs` | WebP proxy pipeline (max 1000 px) | `sharp` thumbnail pass |
+| `src/core/scanner.rs` | Rayon-parallel folder scan + EXIF/GPS/camera | `exifr` + import loop |
+| `src/core/proxy.rs` | JPEG q85 proxy pipeline (≤2048 px, background pool) | `sharp` thumbnail pass |
 | `src/core/export.rs` | Headless 300 DPI raster + PDF/TIFF (WIP) | `sharp` + `pdf-lib` |
 | `src/core/secrets.rs` | Env-var key access (never logged/persisted) | `process.env.*` reads |
 
 ## Data flow (scan → canvas)
 
 1. `native.scanFolder(dir)` → rayon walk, `scanner-progress` events, light JSON rows.
-2. `native.generateProxies(paths)` → WebP proxies in the app cache, `proxy-progress` events.
+2. `native.generateProxies(paths)` → JPEG q85 proxies (long edge ≤ 2048 px) in the
+   app cache on the low-priority background pool, `proxy-progress` events.
 3. `native.proxyPath(path)` → cache path, wrapped by `native.assetUrl()` into a
    scoped `asset://` URL. Raw filesystem paths never reach the DOM.
 4. Canvas renders proxies; on export, `native.exportAlbum(job)` re-opens
@@ -37,6 +38,12 @@ npm run check:native   # report only (exit 1 when the toolchain is missing)
 The GitHub release workflow also installs the Rust toolchain and runs
 `cargo check` on every push, so a broken native backend is caught before it
 ships.
+
+## Planning docs
+
+- `MIGRATION.md` — phased Electron → Tauri cutover plan (gates, rollback).
+- `NATIVE_BLUEPRINT.md` — interface blueprint: command surface, error
+  taxonomy, memory rules, security boundary, canvas/GPU roadmap.
 
 ## Migration notes
 

@@ -6,6 +6,7 @@
  *  process, and the hi-res asset is downloaded + cached there on drop. */
 import { useEffect, useRef, useState } from "react";
 import type { StockSearchResult } from "@shared/api";
+import { fallbackToPlaceholder } from "../lib/imageFallback";
 
 /** Payload carried by a stock drag (also used for click-to-add). */
 export interface StockDragPayload {
@@ -242,6 +243,7 @@ export default function StockPanel({
                 className="h-full w-full object-contain"
                 draggable={false}
                 loading="lazy"
+                onError={fallbackToPlaceholder}
               />
             )}
             <span className="absolute bottom-0 right-0 rounded-tl bg-black/50 px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-white">

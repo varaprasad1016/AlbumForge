@@ -14,10 +14,12 @@ import {
   Transformer,
 } from "react-konva";
 import Konva from "konva";
+import StockVectorLayer from "./StockVectorLayer";
 import type { AlbumElement, AlbumPage, CropRect, DesignAsset, PageDesign, PageSize, StockVectorData } from "@shared/api";
 import { PAGE_PATTERNS, patternDataUri } from "@shared/patterns";
 import { findGraphic, graphicCategory, graphicPreviewUri, GRAPHICS, type ShapeKind } from "@shared/designs";
 import { coverCrop, panCropRect, reorderLayer, stageToPage, zoomCropRect, type LayerOp } from "../lib/layoutMath";
+import { mediaUrl } from "../lib/backend";
 import PhotoPicker from "./PhotoPicker";
 import StockPanel, { type StockDragPayload } from "./StockPanel";
 import PromptModal from "./PromptModal";
@@ -148,21 +150,113 @@ interface LayoutOption {
   name: string;
 }
 
-function useLoadedImage(src?: string): HTMLImageElement | null {
+/**
+ * Load an image for a Konva node. Returns `{ img, error }` so callers can tell
+ * a still-loading source from one that failed to decode (corrupt file,
+ * unsupported format, dead URL) — the editor then shows an explicit
+ * "unavailable" placeholder instead of an endless spinner.
+ */
+function useLoadedImage(src?: string): { img: HTMLImageElement | null; error: boolean } {
   const [img, setImg] = useState<HTMLImageElement | null>(null);
+  const [error, setError] = useState(false);
   useEffect(() => {
-    if (!src) return;
+    if (!src) {
+      setImg(null);
+      setError(false);
+      return;
+    }
     let cancelled = false;
     const image = new window.Image();
     image.onload = () => {
-      if (!cancelled) setImg(image);
+      if (!cancelled) {
+        setImg(image);
+        setError(false);
+      }
+    };
+    image.onerror = () => {
+      if (!cancelled) {
+        setImg(null);
+        setError(true);
+      }
     };
     image.src = src;
     return () => {
       cancelled = true;
     };
   }, [src]);
-  return img;
+  return { img, error };
+}
+
+/** Live drop ghost for a stock drag in flight: a dashed landing box that, for
+ *  vector assets, fills with the real shapes (via `StockVectorLayer`) as soon
+ *  as the native download resolves — the element the drop will actually place. */
+interface DragGhost {
+  key: string;
+  payload: StockDragPayload;
+  vector: StockVectorData | null;
+  vectorPending: boolean;
+  cx: number;
+  cy: number;
+}
+
+function StockDropGhost({
+  ghost,
+  canvasW,
+  pageH,
+}: {
+  ghost: DragGhost;
+  canvasW: number;
+  pageH: number;
+}) {
+  const vector = ghost.vector;
+  // Mirror addStockAsset sizing: box aspect from parsed vector dims when
+  // available, else the search-result dims, else square.
+  const natW = vector ? vector.width : ghost.payload.width;
+  const natH = vector ? vector.height : ghost.payload.height;
+  const aspect = natW && natH ? natW / natH : 1;
+  const h = 0.5;
+  const w = Math.min(0.92, Math.max(0.2, h * aspect));
+  // Clamp like the placed element would be.
+  const x = Math.min(Math.max(ghost.cx - w / 2, 0), 1 - w);
+  const y = Math.min(Math.max(ghost.cy - h / 2, 0), 1 - h);
+  const gx = PAGE_X + x * canvasW;
+  const gy = PAGE_Y + y * pageH;
+  const gw = w * canvasW;
+  const gh = h * pageH;
+  const pending = ghost.vectorPending;
+  return (
+    <Layer listening={false}>
+      <Group>
+        {vector && vector.groups.length > 0 && (
+          <Group opacity={0.55} x={gx} y={gy} width={gw} height={gh}>
+            <StockVectorLayer vector={vector} width={gw} height={gh} />
+          </Group>
+        )}
+        <Rect
+          x={gx}
+          y={gy}
+          width={gw}
+          height={gh}
+          fill={vector ? "rgba(99,102,241,0.05)" : "rgba(99,102,241,0.12)"}
+          stroke="#6366f1"
+          strokeWidth={1.5}
+          dash={[5, 4]}
+        />
+        {!vector && (
+          <KText
+            text={pending ? "Preparing vector…" : ghost.payload.kind === "vector" ? "SVG asset" : "Image asset"}
+            x={gx}
+            y={gy + gh / 2 - 8}
+            width={gw}
+            align="center"
+            fontSize={10}
+            fill="#4f46e5"
+            listening={false}
+          />
+        )}
+      </Group>
+    </Layer>
+  );
 }
 
 export default function AlbumEditor({
@@ -276,10 +370,46 @@ export default function AlbumEditor({
   } | null) ?? {};
   const bgColor = bg.color ?? "#fffdf8";
   const bgPattern = bg.pattern ?? null;
-  const patternImg = useLoadedImage(patternDataUri(bgPattern) ?? undefined);
-  const bgImg = useLoadedImage(bg.image?.stockId ? `stock://asset/${bg.image.stockId}` : undefined);
+  const { img: patternImg } = useLoadedImage(patternDataUri(bgPattern) ?? undefined);
+  const { img: bgImg } = useLoadedImage(bg.image?.stockId ? `stock://asset/${bg.image.stockId}` : undefined);
   const spread = page?.isSpread ?? false;
   const canvasW = spread ? PAGE_W * 2 : PAGE_W;
+
+  /* ---- stock drag ghost: live vector preview while dragging onto the page ---- */
+  const [dragGhost, setDragGhost] = useState<DragGhost | null>(null);
+  const ghostPendingRef = useRef<{ key: string; payload: StockDragPayload; cx: number; cy: number } | null>(null);
+  const ghostFrameScheduled = useRef(false);
+
+  // Prefetch + parse a vector as soon as it enters the canvas, so the ghost
+  // shows real shapes mid-drag and the eventual drop resolves from the stock
+  // cache (no second network hop).
+  useEffect(() => {
+    const g = dragGhost;
+    if (!g || g.payload.mode === "background" || g.payload.kind !== "vector" || g.vector || g.vectorPending) {
+      return;
+    }
+    let cancelled = false;
+    setDragGhost((prev) => (prev && prev.key === g.key ? { ...prev, vectorPending: true } : prev));
+    void (async () => {
+      try {
+        const res = await window.albumforge.stock.download(g.payload.providerId, g.payload);
+        if (cancelled) return;
+        setDragGhost((prev) =>
+          prev && prev.key === g.key ? { ...prev, vector: res.vector, vectorPending: false } : prev,
+        );
+      } catch {
+        if (!cancelled) {
+          setDragGhost((prev) =>
+            prev && prev.key === g.key ? { ...prev, vectorPending: false } : prev,
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dragGhost?.key]);
 
   function selectOne(id: string, additive: boolean) {
     if (additive) {
@@ -645,6 +775,13 @@ export default function AlbumEditor({
         toast(res.error);
         return;
       }
+      // A `vector` kind that failed the shared SVG parse (corrupt/complex
+      // markup) has no raster URL either — inserting it would leave a blank
+      // placeholder element on the page. Surface it and bail instead.
+      if (res.kind === "vector" && !res.vector) {
+        toast("This vector file is unsupported. Please try another asset.");
+        return;
+      }
       const isVector = res.kind === "vector" && !!res.vector;
       const natW = isVector ? res.vector!.width : res.width;
       const natH = isVector ? res.vector!.height : res.height;
@@ -692,7 +829,16 @@ export default function AlbumEditor({
       };
       void persist(mutateElements([...elements, el]));
     } catch (e) {
-      toast(`Could not add asset: ${String(e)}`);
+      const msg = e instanceof Error ? e.message : String(e);
+      // Known shared-parser rejections get a human hint, not the raw engine
+      // message (see src/shared/stockParse.ts).
+      const unsupported =
+        msg.includes("Could not parse SVG") || msg.includes("No drawable paths found");
+      toast(
+        unsupported
+          ? "This vector file is unsupported. Please try another asset."
+          : `Could not add asset: ${msg}`,
+      );
     } finally {
       setStockBusy(false);
     }
@@ -730,9 +876,75 @@ export default function AlbumEditor({
     void persist(mutateElements([...elements, el]));
   }
 
+  /** Show the drop ghost under the pointer while a stock item is dragged over
+   *  the canvas. Position updates coalesce per animation frame; the vector
+   *  prefetch (real-shape preview) lives in the `dragGhost?.key` effect. */
+  function handleCanvasDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    const rawStock = e.dataTransfer.getData("application/x-albumforge-stock");
+    if (!rawStock) {
+      setDragGhost(null);
+      return;
+    }
+    let payload: StockDragPayload;
+    try {
+      payload = JSON.parse(rawStock) as StockDragPayload;
+    } catch {
+      setDragGhost(null);
+      return;
+    }
+    // Backgrounds span the whole page — a per-pointer landing box adds nothing.
+    if (payload.mode === "background") {
+      setDragGhost(null);
+      return;
+    }
+    const stage = stageRef.current;
+    if (!stage) return;
+    const rect = stage.container().getBoundingClientRect();
+    const inv = stage.getAbsoluteTransform().copy().invert();
+    const pos = inv.point({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    const key = `${payload.providerId}:${payload.kind}:${payload.mode ?? "layer"}`;
+    ghostPendingRef.current = {
+      key,
+      payload,
+      cx: (pos.x - PAGE_X) / canvasW,
+      cy: (pos.y - PAGE_Y) / PAGE_H,
+    };
+    if (ghostFrameScheduled.current) return;
+    ghostFrameScheduled.current = true;
+    requestAnimationFrame(() => {
+      ghostFrameScheduled.current = false;
+      const p = ghostPendingRef.current;
+      if (!p) return;
+      setDragGhost((prev) =>
+        prev && prev.key === p.key
+          ? { ...prev, cx: p.cx, cy: p.cy }
+          : {
+              key: p.key,
+              payload: p.payload,
+              vector: null,
+              vectorPending: false,
+              cx: p.cx,
+              cy: p.cy,
+            },
+      );
+    });
+  }
+
+  /** dragleave fires when crossing child boundaries — only clear the ghost once
+   *  the pointer truly leaves the canvas container. */
+  function handleCanvasDragLeave(e: React.DragEvent) {
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+      ghostPendingRef.current = null;
+      setDragGhost(null);
+    }
+  }
+
   /** Smart Frame drag-and-drop: photo dropped onto a frame → replace with cover-crop; empty canvas → add. */
   function handleCanvasDrop(e: React.DragEvent) {
     e.preventDefault();
+    setDragGhost(null);
+    ghostPendingRef.current = null;
     const rawStock = e.dataTransfer.getData("application/x-albumforge-stock");
     if (rawStock) {
       let data: StockDragPayload;
@@ -1396,7 +1608,8 @@ export default function AlbumEditor({
 
         <section
           className="flex flex-1 items-center justify-center overflow-auto rounded-2xl bg-neutral-200/90 p-6"
-          onDragOver={(e) => e.preventDefault()}
+          onDragOver={handleCanvasDragOver}
+          onDragLeave={handleCanvasDragLeave}
           onDrop={handleCanvasDrop}
         >
           <div className="relative shadow-2xl shadow-slate-900/20">
@@ -1565,6 +1778,7 @@ export default function AlbumEditor({
             })}
             <Transformer ref={trRef} rotateEnabled anchorSize={8} />
           </Layer>
+          {dragGhost && <StockDropGhost ghost={dragGhost} canvasW={canvasW} pageH={PAGE_H} />}
         </Stage>
 
           {/* Inline text editor — double-click a text element and type directly on the canvas. */}
@@ -2405,7 +2619,7 @@ function MiniPage({ page, aspect }: { page: AlbumPage; aspect: number }) {
           return (
             <div
               key={el.id}
-              style={{ ...box, backgroundImage: `url("media://preview1024/${el.photoId}")`, backgroundSize: "cover", backgroundPosition: "center" }}
+              style={{ ...box, backgroundImage: `url("${mediaUrl(el.photoId, "preview1024")}")`, backgroundSize: "cover", backgroundPosition: "center" }}
             />
           );
         }
@@ -2512,8 +2726,8 @@ function ElementNode({
   const blendMode = styleMeta.blendMode;
   const maskActive = styleMeta.mask?.kind === "alpha" && !!el.photoId;
 
-  const img = useLoadedImage(el.photoId ? `media://preview1024/${el.photoId}` : undefined);
-  const matteImg = useLoadedImage(maskActive && el.photoId ? `media://matte/${el.photoId}` : undefined);
+  const { img } = useLoadedImage(el.photoId ? mediaUrl(el.photoId, "preview1024") : undefined);
+  const { img: matteImg } = useLoadedImage(maskActive && el.photoId ? mediaUrl(el.photoId, "matte") : undefined);
 
   useEffect(() => {
     if (el.type === "image" && img) {
@@ -2574,7 +2788,7 @@ function ElementNode({
     const style = (el.style ?? {}) as { graphicId?: string; color?: string; opacity?: number; assetUri?: string };
     const color = style.color ?? "#b17e36";
     const opacity = style.opacity ?? 1;
-    const assetImg = useLoadedImage(style.assetUri ?? undefined);
+    const { img: assetImg } = useLoadedImage(style.assetUri ?? undefined);
     const g = style.assetUri ? undefined : findGraphic(style.graphicId ?? "");
     return (
       <Group
@@ -2627,13 +2841,7 @@ function ElementNode({
         onDragEnd={onDragEnd}
         onTransformEnd={onTransformEnd}
       >
-        {v && v.groups.length > 0 && (
-          <Group scaleX={w / v.width} scaleY={h / v.height}>
-            {v.groups.map((grp, gi) =>
-              grp.paths.map((d, i) => <Path key={`${gi}-${i}`} data={d} fill={grp.color} lineJoin="round" />),
-            )}
-          </Group>
-        )}
+        {v && v.groups.length > 0 && <StockVectorLayer vector={v} width={w} height={h} />}
         {selected && <Rect width={w} height={h} stroke="#5b5bd6" strokeWidth={1} listening={false} />}
       </Group>
     );
@@ -2641,7 +2849,9 @@ function ElementNode({
 
   if (el.type === "stock-photo") {
     const style = (el.style ?? {}) as { stockId?: string; opacity?: number };
-    const stockImg = useLoadedImage(style.stockId ? `stock://asset/${style.stockId}` : undefined);
+    const { img: stockImg, error: stockImgError } = useLoadedImage(
+      style.stockId ? `stock://asset/${style.stockId}` : undefined,
+    );
     return (
       <Group
         ref={nodeRef}
@@ -2660,8 +2870,22 @@ function ElementNode({
         onDragEnd={onDragEnd}
         onTransformEnd={onTransformEnd}
       >
-        {stockImg ? <KImage image={stockImg} width={w} height={h} /> : <Rect width={w} height={h} fill="#fffaf0" stroke="#d6b06f" strokeWidth={1} dash={[4, 4]} />}
-        {!stockImg && <KText text="Loading element…" width={w} y={h / 2 - 7} align="center" fontSize={12} fill="#9b6a2d" listening={false} />}
+        {stockImg ? (
+          <KImage image={stockImg} width={w} height={h} />
+        ) : (
+          <Rect width={w} height={h} fill={stockImgError ? "#fdf2f0" : "#fffaf0"} stroke={stockImgError ? "#e07a6a" : "#d6b06f"} strokeWidth={1} dash={[4, 4]} />
+        )}
+        {!stockImg && (
+          <KText
+            text={stockImgError ? "Unsupported image format — try another asset" : "Loading element…"}
+            width={w}
+            y={stockImgError ? Math.max(2, h / 2 - 9) : h / 2 - 7}
+            align="center"
+            fontSize={stockImgError ? 9 : 12}
+            fill={stockImgError ? "#c05621" : "#9b6a2d"}
+            listening={false}
+          />
+        )}
         {selected && <Rect width={w} height={h} stroke="#5b5bd6" strokeWidth={1} listening={false} />}
       </Group>
     );

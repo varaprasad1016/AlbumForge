@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import type { GeoPoint } from "@shared/api";
+import { mediaUrl } from "../lib/backend";
 
 const CLUSTER_DEG = 0.02;
 
@@ -82,7 +83,7 @@ export default function MapPage({ projectId }: { projectId: string }) {
            <div style="display:flex;gap:4px;flex-wrap:wrap">
              ${c.items
                .slice(0, 5)
-               .map((p) => `<img src="media://thumb256/${p.id}" style="width:64px;height:64px;object-fit:cover;border-radius:6px" />`)
+               .map((p) => `<img src="${mediaUrl(p.id, "thumb256")}" style="width:64px;height:64px;object-fit:cover;border-radius:6px" />`)
                .join("")}
            </div>
            ${extra > 0 ? `<p style="margin:6px 0 0;font-size:11px;color:#94a3b8">+ ${extra} more</p>` : ""}

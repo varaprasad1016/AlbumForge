@@ -3,5 +3,9 @@
   "identifier": "default",
   "description": "Main window capabilities for the AlbumForge native backend",
   "windows": ["main"],
-  "permissions": ["core:default", "core:event:default"]
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "updater:default"
+  ]
 }

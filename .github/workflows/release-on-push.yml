@@ -306,3 +306,99 @@ jobs:
           curl -s -X PATCH -H "$AUTH" -H "$UA" -H "Content-Type: application/json" \
             -d "{\"body\":\"published $APK_NAME\"}" "$BASE/releases/$REL_ID" -o /dev/null || true
           echo "Published $APK_NAME to release $TAG"
+  native-publish:
+    # Phase 7: publish the native (Tauri 2 / Rust) Windows build to the same
+    # v* release the Electron installers land on. The NSIS installer is signed
+    # with the updater key and a static tauri-update.json feed is attached, so
+    # the native app's tauri-plugin-updater finds updates on GitHub Releases
+    # exactly like electron-updater does. Runs after the Electron `build` job
+    # so both jobs publish to one release without racing. Skipped (with a
+    # notice) until the signing secrets exist — Tauri refuses to build updater
+    # artifacts unsigned.
+    needs: [release, build]
+    if: needs.release.outputs.bumped == 'true'
+    runs-on: windows-latest
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Check out the bumped commit
+        run: git fetch origin main && git reset --hard origin/main
+
+      - name: Verify packaged source and version
+        shell: bash
+        run: |
+          node -e "const p=require('./package.json'); if (p.version !== '${{ needs.release.outputs.version }}') throw new Error('Version mismatch: '+p.version)"
+          node -e "const c=require('./src-tauri/tauri.conf.json'); if (c.version !== '${{ needs.release.outputs.version }}') throw new Error('Native version mismatch: '+c.version)"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Notice — updater signing secrets not configured
+        if: env.TAURI_SIGNING_PRIVATE_KEY == ''
+        run: |
+          echo "::notice title=Native publish skipped::TAURI_SIGNING_PRIVATE_KEY is not a repository secret yet — the signed native installer and tauri-update.json feed were not published. Add TAURI_SIGNING_PRIVATE_KEY + TAURI_SIGNING_PRIVATE_KEY_PASSWORD (see MIGRATION.md Phase 7) and push again."
+
+      - name: Build signed native Windows installer (NSIS)
+        if: env.TAURI_SIGNING_PRIVATE_KEY != ''
+        shell: bash
+        run: |
+          npm run build
+          npm run tauri -- build --bundles nsis
+
+      - name: Assemble the update feed (tauri-update.json)
+        if: env.TAURI_SIGNING_PRIVATE_KEY != ''
+        shell: bash
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          NSIS_DIR="src-tauri/target/release/bundle/nsis"
+          INSTALLER="$(ls "$NSIS_DIR"/*-setup.exe | head -n 1)"
+          test -n "$INSTALLER"
+          test -s "${INSTALLER}.sig"
+          node - "$VERSION" "$INSTALLER" <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const [version, installer] = process.argv.slice(2);
+          const name = path.basename(installer);
+          const signature = fs.readFileSync(installer + '.sig', 'utf8').trim();
+          const json = {
+            version,
+            notes: 'AlbumForge ' + version,
+            pub_date: new Date().toISOString(),
+            platforms: {
+              'windows-x86_64': {
+                signature,
+                url:
+                  'https://github.com/' + process.env.GITHUB_REPOSITORY +
+                  '/releases/download/v' + version + '/' + encodeURIComponent(name),
+              },
+            },
+          };
+          fs.writeFileSync('tauri-update.json', JSON.stringify(json, null, 2) + '\n');
+          NODE
+          echo "feed: $(head -c 120 tauri-update.json) ..."
+
+      - name: Publish installer, signature and update feed to the release
+        if: env.TAURI_SIGNING_PRIVATE_KEY != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.release.outputs.version }}
+          files: |
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/bundle/nsis/*-setup.exe.sig
+            tauri-update.json
+
