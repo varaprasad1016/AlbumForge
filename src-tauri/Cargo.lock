@@ -42,7 +42,7 @@ dependencies = [
 
 [[package]]
 name = "albumforge"
-version = "0.10.17"
+version = "0.10.18"
 dependencies = [
  "base64 0.22.1",
  "chrono",

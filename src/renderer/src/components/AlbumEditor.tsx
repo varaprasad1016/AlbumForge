@@ -17,7 +17,15 @@ import Konva from "konva";
 import StockVectorLayer from "./StockVectorLayer";
 import type { AlbumElement, AlbumPage, CropRect, DesignAsset, PageDesign, PageSize, StockVectorData } from "@shared/api";
 import { PAGE_PATTERNS, patternDataUri } from "@shared/patterns";
-import { findGraphic, graphicCategory, graphicPreviewUri, GRAPHICS, type ShapeKind } from "@shared/designs";
+import {
+  findGraphic,
+  graphicCategory,
+  graphicPreviewUri,
+  GRAPHICS,
+  roundRectRadius,
+  starPointsFor,
+  type ShapeKind,
+} from "@shared/designs";
 import { coverCrop, panCropRect, reorderLayer, stageToPage, zoomCropRect, type LayerOp } from "../lib/layoutMath";
 import { mediaUrl } from "../lib/backend";
 import PhotoPicker from "./PhotoPicker";
@@ -97,11 +105,27 @@ function layerLabel(el: AlbumElement): string {
     const content = (el.text as { content?: string } | null)?.content ?? "";
     return `Text: ${content.slice(0, 24) || "…"}`;
   }
-  if (el.type === "shape") return `Shape: ${(el.style as { shape?: string } | null)?.shape ?? "rect"}`;
+  if (el.type === "shape") {
+    const shape = (el.style as { shape?: string } | null)?.shape ?? "rect";
+    return shapeFrameKind(el.style) && el.photoId ? `Photo frame (${shape})` : `Shape: ${shape}`;
+  }
   if (el.type === "graphic") return "Graphic";
   if (el.type === "stock-vector") return "Stock vector";
   if (el.type === "stock-photo") return "Stock image";
   return el.type;
+}
+
+/** Shapes that can act as photo frames (Canva-style: drop a photo into the shape). */
+const FRAME_SHAPES = new Set(["rect", "ellipse", "star"]);
+
+function shapeFrameKind(style: unknown): string | null {
+  const shape = (style as { shape?: string } | null)?.shape;
+  return shape && FRAME_SHAPES.has(shape) ? shape : null;
+}
+
+/** Can a dragged photo replace this element's content? */
+function isPhotoFrameEl(el: AlbumElement): boolean {
+  return el.type === "image" || el.type === "stock-photo" || (el.type === "shape" && !!shapeFrameKind(el.style));
 }
 
 function FilterSlider({
@@ -377,6 +401,33 @@ export default function AlbumEditor({
 
   /* ---- stock drag ghost: live vector preview while dragging onto the page ---- */
   const [dragGhost, setDragGhost] = useState<DragGhost | null>(null);
+  /* Canva-style frame targeting: while a photo is dragged over the canvas, the
+   * frame element under the pointer (image, stock photo or a shape frame) gets
+   * a live outline. The ref avoids re-renders on every pixel of movement. */
+  const [frameTargetId, setFrameTargetId] = useState<string | null>(null);
+  const frameTargetRef = useRef<string | null>(null);
+  function setFrameTarget(id: string | null) {
+    if (frameTargetRef.current !== id) {
+      frameTargetRef.current = id;
+      setFrameTargetId(id);
+    }
+  }
+
+  /** Topmost photo-frame element under a stage point — image elements,
+   *  stock photos and rect/ellipse/star shapes (Canva-style frames). Bounds
+   *  test ordered by z, so overlapping non-frame layers (text, ornaments)
+   *  never steal the drop from a frame underneath. */
+  function frameElementAt(pos: Konva.Vector2d): AlbumElement | undefined {
+    const px = (pos.x - PAGE_X) / canvasW;
+    const py = (pos.y - PAGE_Y) / PAGE_H;
+    let best: AlbumElement | undefined;
+    for (const el of elements) {
+      if (!isPhotoFrameEl(el)) continue;
+      if (px < el.x || py < el.y || px > el.x + el.width || py > el.y + el.height) continue;
+      if (!best || el.z >= best.z) best = el;
+    }
+    return best;
+  }
   const ghostPendingRef = useRef<{ key: string; payload: StockDragPayload; cx: number; cy: number } | null>(null);
   const ghostFrameScheduled = useRef(false);
 
@@ -673,19 +724,19 @@ export default function AlbumEditor({
     commit(pagesState.map((p) => (p.id === page.id ? { ...p, elements: next } : p)));
   }
 
-  /** Current zoom factor (1× = full cover crop) of an image element. */
+  /** Current zoom factor (1× = full cover crop) of a photo frame element. */
   function cropZoomValue(el: AlbumElement): number {
     const dims = srcDimsRef.current[el.id];
-    if (!dims) return 1;
+    if (!dims || !isFramedEl(el)) return 1;
     const cover = coverCrop(dims.w, dims.h, el.width * canvasW, el.height * PAGE_H);
     const cur = el.crop ?? cover;
     return Math.max(1, cover.width / (cur.width || cover.width));
   }
 
-  /** Zoom an image's crop around its centre (1× = full object-fit cover frame). */
+  /** Zoom a photo frame's crop around its centre (1× = full object-fit cover frame). */
   function setCropZoom(el: AlbumElement, zoom: number) {
     const dims = srcDimsRef.current[el.id];
-    if (!dims) return;
+    if (!dims || !isFramedEl(el)) return;
     const cover = coverCrop(dims.w, dims.h, el.width * canvasW, el.height * PAGE_H);
     const cur = el.crop ?? cover;
     updateElementLive(el.id, { crop: zoomCropRect(cur, cover, zoom) });
@@ -697,9 +748,13 @@ export default function AlbumEditor({
     setCropModeId(null);
   }
 
+  function isFramedEl(el: AlbumElement): boolean {
+    return el.type === "image" || (el.type === "shape" && !!el.photoId && !!shapeFrameKind(el.style));
+  }
+
   /** On-device subject cutout: segment the selected photo and mask the element. */
   async function removeBackground() {
-    if (!selected || selected.type !== "image" || !selected.photoId) return;
+    if (!selected || !isFramedEl(selected) || !selected.photoId) return; // subject cutout is a framed-photo feature
     // Toggle off when the subject is already isolated.
     if (selectedMask) {
       updateElement(selected.id, { style: { ...(selected.style ?? {}), mask: undefined } });
@@ -884,8 +939,30 @@ export default function AlbumEditor({
     const rawStock = e.dataTransfer.getData("application/x-albumforge-stock");
     if (!rawStock) {
       setDragGhost(null);
+      // Photo drag: live-highlight the frame currently under the pointer.
+      const rawPhoto = e.dataTransfer.getData("application/x-albumforge-photo");
+      const stage = stageRef.current;
+      if (!rawPhoto || !stage) {
+        setFrameTarget(null);
+        return;
+      }
+      try {
+        const data = JSON.parse(rawPhoto) as { id?: string };
+        if (!data.id) {
+          setFrameTarget(null);
+          return;
+        }
+      } catch {
+        setFrameTarget(null);
+        return;
+      }
+      const rect = stage.container().getBoundingClientRect();
+      const inv = stage.getAbsoluteTransform().copy().invert();
+      const pos = inv.point({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+      setFrameTarget(frameElementAt(pos)?.id ?? null);
       return;
     }
+    setFrameTarget(null);
     let payload: StockDragPayload;
     try {
       payload = JSON.parse(rawStock) as StockDragPayload;
@@ -937,6 +1014,7 @@ export default function AlbumEditor({
     if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
       ghostPendingRef.current = null;
       setDragGhost(null);
+      setFrameTarget(null);
     }
   }
 
@@ -945,6 +1023,7 @@ export default function AlbumEditor({
     e.preventDefault();
     setDragGhost(null);
     ghostPendingRef.current = null;
+    setFrameTarget(null);
     const rawStock = e.dataTransfer.getData("application/x-albumforge-stock");
     if (rawStock) {
       let data: StockDragPayload;
@@ -981,27 +1060,24 @@ export default function AlbumEditor({
     const inv = stage.getAbsoluteTransform().copy().invert();
     const pos = inv.point({ x: e.clientX - rect.left, y: e.clientY - rect.top });
 
-    // Smart frame hit test — walk up from the topmost shape to the owning element group.
-    let hitEl: AlbumElement | undefined;
-    const top = stage.getIntersection(pos);
-    let n: Konva.Node | null = top;
-    while (n && n !== stage) {
-      const nid = n.id();
-      if (nid && elements.some((el) => el.id === nid)) {
-        hitEl = elements.find((el) => el.id === nid);
-        break;
-      }
-      n = n.getParent();
-    }
+    // Smart frame hit test — image elements, stock photos and rect/ellipse/star
+    // shapes all act as frames; walking up from the topmost node finds the owner.
+    const hitEl = frameElementAt(pos);
 
-    // 1) Dropped onto a frame → replace the photo; crop: null = auto object-fit cover.
-    if (hitEl?.type === "image") {
+    // 1) Dropped onto a frame → replace its content; crop: null = auto object-fit
+    //    cover (the photo always fills the frame, never distorted). A stock photo
+    //    becomes a native image element; a shape becomes a photo frame.
+    if (hitEl) {
+      const patch: Partial<AlbumElement> =
+        hitEl.type === "stock-photo"
+          ? { type: "image", photoId: data.id, crop: null, style: null }
+          : { photoId: data.id, crop: null };
       void persist(
         pagesState.map((p) =>
           p.id === page.id
             ? {
                 ...p,
-                elements: p.elements.map((x) => (x.id === hitEl!.id ? { ...x, photoId: data.id, crop: null } : x)),
+                elements: p.elements.map((x) => (x.id === hitEl.id ? { ...x, ...patch } : x)),
               }
             : p,
         ),
@@ -1753,6 +1829,7 @@ export default function AlbumEditor({
                   pageW={canvasW}
                   pageH={PAGE_H}
                   selected={selectedIds.has(el.id)}
+                  frameTarget={frameTargetId === el.id}
                   cropMode={cropMode}
                   nodeRef={(n) => {
                     nodeRefs.current[el.id] = n;
@@ -2232,7 +2309,7 @@ export default function AlbumEditor({
                   )}
                 </div>
               )}
-              {selected.type === "image" && (
+              {isFramedEl(selected) && (
                 <div className="space-y-2 border-t border-slate-100 pt-3">
                   <div className="flex items-center justify-between">
                     <label className="field-label !mb-0">Crop / pan</label>
@@ -2672,6 +2749,67 @@ function MiniPage({ page, aspect }: { page: AlbumPage; aspect: number }) {
   );
 }
 
+/** Source-pixel crop rect that fills a w×h node box: a stored normalized crop
+ *  maps 1:1 to source pixels; without one, centre-crop cover fills the box.
+ *  Shared by the plain-image and shape-frame renderers. */
+function sourceCropPx(
+  srcW: number,
+  srcH: number,
+  w: number,
+  h: number,
+  crop: CropRect | null,
+): { x: number; y: number; width: number; height: number } | undefined {
+  if (!(srcW > 0 && srcH > 0 && w > 0 && h > 0)) return undefined;
+  if (crop) {
+    return { x: crop.x * srcW, y: crop.y * srcH, width: crop.width * srcW, height: crop.height * srcH };
+  }
+  const nodeAspect = w / h;
+  const srcAspect = srcW / srcH;
+  if (srcAspect > nodeAspect) {
+    const cw = srcH * nodeAspect;
+    return { x: (srcW - cw) / 2, y: 0, width: cw, height: srcH };
+  }
+  const ch = srcW / nodeAspect;
+  return { x: 0, y: (srcH - ch) / 2, width: srcW, height: ch };
+}
+
+/** Konva clip function for a shape-frame silhouette. The Group is keyed on
+ *  crop/source/box-size so the closure is rebuilt when any of them change.
+ *  Geometry matches the export masks (`shapeMaskSvg` / native rasteriser):
+ *  inset only for non-photo frames, star points shared with `shapeSvg`. */
+function clipFuncFor(
+  kind: string,
+  style: { radius?: number },
+  w: number,
+  h: number,
+): (ctx: Konva.Context) => void {
+  return (ctx) => {
+    if (kind === "ellipse") {
+      ctx.beginPath();
+      ctx.ellipse(w / 2, h / 2, Math.max(0.5, w / 2), Math.max(0.5, h / 2), 0, 0, Math.PI * 2, false);
+      ctx.closePath();
+    } else if (kind === "star") {
+      ctx.beginPath();
+      const pts = starPointsFor(w, h);
+      pts.forEach(([px, py], i) => (i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py)));
+      ctx.closePath();
+    } else {
+      const r = Math.min(roundRectRadius(style, w, h), w / 2, h / 2);
+      ctx.beginPath();
+      ctx.moveTo(r, 0);
+      ctx.lineTo(w - r, 0);
+      ctx.arcTo(w, 0, w, r, r);
+      ctx.lineTo(w, h - r);
+      ctx.arcTo(w, h, w - r, h, r);
+      ctx.lineTo(r, h);
+      ctx.arcTo(0, h, 0, h - r, r);
+      ctx.lineTo(0, r);
+      ctx.arcTo(0, 0, r, 0, r);
+      ctx.closePath();
+    }
+  };
+}
+
 function ElementNode({
   el,
   pageX,
@@ -2679,6 +2817,7 @@ function ElementNode({
   pageW,
   pageH,
   selected,
+  frameTarget = false,
   cropMode = false,
   editingText = false,
   nodeRef,
@@ -2699,6 +2838,7 @@ function ElementNode({
   pageW: number;
   pageH: number;
   selected: boolean;
+  frameTarget?: boolean;
   cropMode?: boolean;
   editingText?: boolean;
   nodeRef: (n: Konva.Group | null) => void;
@@ -2726,11 +2866,27 @@ function ElementNode({
   const blendMode = styleMeta.blendMode;
   const maskActive = styleMeta.mask?.kind === "alpha" && !!el.photoId;
 
-  const { img } = useLoadedImage(el.photoId ? mediaUrl(el.photoId, "preview1024") : undefined);
+  const { img } = useLoadedImage(
+    el.photoId && (el.type === "image" || (el.type === "shape" && !!shapeFrameKind(el.style)))
+      ? mediaUrl(el.photoId, "preview1024")
+      : undefined,
+  );
   const { img: matteImg } = useLoadedImage(maskActive && el.photoId ? mediaUrl(el.photoId, "matte") : undefined);
 
+  /** Crop/Pan mode: keep the frame fixed, move the crop window with the cursor instead. */
+  const panCropMove = (node: Konva.Group) => {
+    if (!dragOriginRef.current || !srcW || !srcH) return;
+    const dx = node.x() - dragOriginRef.current.x;
+    const dy = node.y() - dragOriginRef.current.y;
+    node.position({ x: dragOriginRef.current.x, y: dragOriginRef.current.y });
+    if (dx === 0 && dy === 0) return;
+    const cur = el.crop ?? coverCrop(srcW, srcH, w, h);
+    const next = panCropRect(cur, dx, dy, w, h);
+    if (next.x !== cur.x || next.y !== cur.y) onCropPan?.(next);
+  };
+
   useEffect(() => {
-    if (el.type === "image" && img) {
+    if ((el.type === "image" || (el.type === "shape" && !!el.photoId && !!shapeFrameKind(el.style))) && img) {
       onImgLoad?.(img.naturalWidth, img.naturalHeight);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2748,9 +2904,14 @@ function ElementNode({
     const fill = s.fill && s.fill !== "none" ? s.fill : undefined;
     const stroke = s.stroke ?? "#0f172a";
     const sw = Math.max(1, s.strokeWidth ?? 2);
+    const frameKind = shapeFrameKind(el.style);
+    // Photo frame: the shape's stroke is redrawn on top of the photo so the
+    // frame edge stays crisp — keep it at least hairline-visible.
+    const swFrame = el.photoId && frameKind ? Math.max(sw, 2) : sw;
+    const swNode = Math.max(1, sw - swFrame / 2);
     let shapeNode: React.ReactNode;
     if (s.shape === "ellipse") {
-      shapeNode = <Ellipse x={w / 2} y={h / 2} radiusX={Math.max(1, w / 2 - sw / 2)} radiusY={Math.max(1, h / 2 - sw / 2)} fill={fill} stroke={stroke} strokeWidth={sw} />;
+      shapeNode = <Ellipse x={w / 2} y={h / 2} radiusX={Math.max(1, w / 2 - swNode / 2)} radiusY={Math.max(1, h / 2 - swNode / 2)} fill={fill} stroke={stroke} strokeWidth={swNode} />;
     } else if (s.shape === "line") {
       shapeNode = <Line points={[sw / 2, h / 2, w - sw / 2, h / 2]} stroke={stroke} strokeWidth={sw} lineCap="round" />;
     } else if (s.shape === "arrow") {
@@ -2759,8 +2920,22 @@ function ElementNode({
       const r = Math.min(w, h) / 2 - sw / 2;
       shapeNode = <Star x={w / 2} y={h / 2} numPoints={5} innerRadius={r * 0.42} outerRadius={r} fill={fill ?? stroke} stroke={stroke} strokeWidth={sw} />;
     } else {
-      shapeNode = <Rect width={w} height={h} cornerRadius={Math.min(s.radius ?? 0, w / 2, h / 2)} fill={fill ?? stroke} stroke={stroke} strokeWidth={sw} />;
+      shapeNode = <Rect width={w} height={h} cornerRadius={roundRectRadius(s, w, h)} fill={fill ?? stroke} stroke={stroke} strokeWidth={sw} />;
     }
+
+    // Canva-style photo frame: the photo renders cover-cropped inside the
+    // shape's silhouette (clip path), with the stroke restroke above it. The
+    // clip Group is keyed on crop + source + box size so Konva rebuilds the
+    // clip path when any of them change.
+    const natW = img?.naturalWidth ?? 0;
+    const natH = img?.naturalHeight ?? 0;
+    const frameFp = imageFilterProps(styleMeta.filters);
+    const showPhoto = !!frameKind && !!el.photoId && !!img;
+    const clipKey = showPhoto
+      ? `${el.photoId}:${Math.round(natW)}x${Math.round(natH)}:${Math.round(w)}x${Math.round(h)}:${
+          el.crop ? `${el.crop.x},${el.crop.y},${el.crop.width},${el.crop.height}` : "cover"
+        }`
+      : null;
     return (
       <Group
         ref={nodeRef}
@@ -2775,11 +2950,45 @@ function ElementNode({
         draggable
         onClick={onSelect}
         onTap={onSelect}
-        onDragMove={(e) => onDragMove?.(e.target as Konva.Group, e)} onDragEnd={onDragEnd}
-        onTransformEnd={onTransformEnd}
+        onDblClick={frameKind && el.photoId ? () => onEnterCropMode?.() : undefined}
+        onDragStart={
+          cropMode
+            ? (e) => {
+                const n = e.target as Konva.Group;
+                dragOriginRef.current = { x: n.x(), y: n.y() };
+                onCropDragStart?.();
+              }
+            : undefined
+        }
+        onDragMove={
+          cropMode ? (e) => panCropMove(e.target as Konva.Group) : (e) => onDragMove?.(e.target as Konva.Group, e)
+        }
+        onDragEnd={cropMode ? () => onCropDragEnd?.() : onDragEnd}
+        onTransformEnd={cropMode ? undefined : onTransformEnd}
       >
-        {shapeNode}
-        {selected && <Rect width={w} height={h} stroke="#5b5bd6" strokeWidth={1} listening={false} />}
+        {showPhoto && (
+          <Group key={clipKey} clipFunc={clipFuncFor(frameKind!, s, w, h)}>
+            <KImage
+              image={img}
+              crop={sourceCropPx(natW, natH, w, h, el.crop)}
+              width={w}
+              height={h}
+              filters={frameFp.filters}
+              {...frameFp.props}
+            />
+          </Group>
+        )}
+        {!showPhoto && shapeNode}
+        <Rect
+          width={w}
+          height={h}
+          stroke={showPhoto ? stroke : "#5b5bd6"}
+          strokeWidth={showPhoto ? Math.max(1, swFrame) : 1}
+          dash={frameTarget && !selected ? [4, 4] : undefined}
+          listening={false}
+          visible={showPhoto || selected || frameTarget}
+        />
+        {cropMode && <Rect width={w} height={h} stroke="#f43f5e" strokeWidth={1.5} dash={[6, 4]} listening={false} />}
       </Group>
     );
   }
@@ -2943,41 +3152,11 @@ function ElementNode({
   const srcW = img?.naturalWidth ?? 0;
   const srcH = img?.naturalHeight ?? 0;
 
-  let cropPx: { x: number; y: number; width: number; height: number } | null = null;
-  if (el.crop && srcW > 0) {
-    cropPx = {
-      x: el.crop.x * srcW,
-      y: el.crop.y * srcH,
-      width: el.crop.width * srcW,
-      height: el.crop.height * srcH,
-    };
-  } else if (!el.crop && img && srcW > 0 && srcH > 0) {
-    const nodeAspect = w / h;
-    const srcAspect = srcW / srcH;
-    if (srcAspect > nodeAspect) {
-      const cw = srcH * nodeAspect;
-      cropPx = { x: (srcW - cw) / 2, y: 0, width: cw, height: srcH };
-    } else {
-      const ch = srcW / nodeAspect;
-      cropPx = { x: 0, y: (srcH - ch) / 2, width: srcW, height: ch };
-    }
-  }
+  const cropPx = sourceCropPx(srcW, srcH, w, h, el.crop);
 
   const fp = imageFilterProps(styleMeta.filters);
   const maskedCanvas =
     maskActive && img && matteImg && cropPx ? compositeMaskedCanvas(img, matteImg, cropPx, w, h) : null;
-
-  /** Crop/Pan mode: keep the frame fixed, move the crop window with the cursor instead. */
-  const panCropMove = (node: Konva.Group) => {
-    if (!dragOriginRef.current || !srcW || !srcH) return;
-    const dx = node.x() - dragOriginRef.current.x;
-    const dy = node.y() - dragOriginRef.current.y;
-    node.position({ x: dragOriginRef.current.x, y: dragOriginRef.current.y });
-    if (dx === 0 && dy === 0) return;
-    const cur = el.crop ?? coverCrop(srcW, srcH, w, h);
-    const next = panCropRect(cur, dx, dy, w, h);
-    if (next.x !== cur.x || next.y !== cur.y) onCropPan?.(next);
-  };
 
   return (
     <Group

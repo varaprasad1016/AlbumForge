@@ -1340,6 +1340,52 @@ export function graphicSvg(
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.round(width)}" height="${Math.round(height)}" viewBox="0 0 ${g.w} ${g.h}" opacity="${opacity}">${paths}</svg>`;
 }
 
+/** 10-vertex star polygon (5 points, inner radius 0.42×, first point up).
+ *  Shared by the Konva renderer (clip + outline), `shapeSvg` and the photo-frame
+ *  masks so canvas, SVG export and native raster agree on one geometry. */
+export function starPointsFor(width: number, height: number, strokeWidth = 0): Array<[number, number]> {
+  const w = Math.max(1, width);
+  const h = Math.max(1, height);
+  const cx = w / 2;
+  const cy = h / 2;
+  const rOuter = Math.max(1, Math.min(w, h) / 2 - Math.max(0, strokeWidth) / 2);
+  const rInner = rOuter * 0.42;
+  const pts: Array<[number, number]> = [];
+  for (let i = 0; i < 10; i++) {
+    const r = i % 2 === 0 ? rOuter : rInner;
+    const a = (Math.PI / 5) * i - Math.PI / 2;
+    pts.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]);
+  }
+  return pts;
+}
+
+/** Corner radius for a rounded-rect shape, clamped to the box (renderer + export parity). */
+export function roundRectRadius(style: { radius?: number }, width: number, height: number): number {
+  return Math.max(0, Math.min(style.radius ?? 0, width / 2, height / 2));
+}
+
+/** Solid silhouette SVG for a shape element (fill only, no stroke) — the dest-in
+ *  mask when a photo is dropped into the shape (Canva-style photo frame).
+ *  Returns "" for open shapes (line/arrow), which cannot frame a photo.
+ *  Rotation is baked around the element center, exactly like `shapeSvg`. */
+export function shapeMaskSvg(style: ShapeStyle, width: number, height: number, rotationDeg = 0): string {
+  const w = Math.max(1, Math.round(width));
+  const h = Math.max(1, Math.round(height));
+  const rot = rotationDeg ? ` transform="rotate(${rotationDeg} ${w / 2} ${h / 2})"` : "";
+  let body = "";
+  if (style.shape === "ellipse") {
+    body = `<ellipse cx="${w / 2}" cy="${h / 2}" rx="${w / 2}" ry="${h / 2}"/>`;
+  } else if (style.shape === "star") {
+    body = `<polygon points="${starPointsFor(w, h).map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ")}"/>`;
+  } else if (style.shape === "line" || style.shape === "arrow") {
+    return "";
+  } else {
+    const r = roundRectRadius(style, w, h);
+    body = `<rect width="${w}" height="${h}" rx="${r}"/>`;
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"${rot} viewBox="0 0 ${w} ${h}"><g fill="#ffffff">${body}</g></svg>`;
+}
+
 /** SVG markup for a shape element. Rotation is baked around the element center. */
 export function shapeSvg(style: ShapeStyle, width: number, height: number, rotationDeg = 0): string {
   const w = Math.max(1, Math.round(width));
@@ -1358,17 +1404,7 @@ export function shapeSvg(style: ShapeStyle, width: number, height: number, rotat
     const head = Math.min(14, h, w);
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"${rot}><line x1="${sw / 2}" y1="${h / 2}" x2="${w - head}" y2="${h / 2}" stroke="${stroke}" stroke-width="${sw}" stroke-linecap="round" opacity="${op}"/><path d="M${w - head} ${h / 2 - head / 2} L${w - sw / 2} ${h / 2} L${w - head} ${h / 2 + head / 2} Z" fill="${stroke}" opacity="${op}"/></svg>`;
   } else if (style.shape === "star") {
-    const cx = w / 2;
-    const cy = h / 2;
-    const rOuter = Math.min(w, h) / 2 - sw / 2;
-    const rInner = rOuter * 0.42;
-    const pts: string[] = [];
-    for (let i = 0; i < 10; i++) {
-      const r = i % 2 === 0 ? rOuter : rInner;
-      const a = (Math.PI / 5) * i - Math.PI / 2;
-      pts.push(`${(cx + r * Math.cos(a)).toFixed(1)},${(cy + r * Math.sin(a)).toFixed(1)}`);
-    }
-    body = `<polygon points="${pts.join(" ")}"/>`;
+    body = `<polygon points="${starPointsFor(w, h, sw).map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ")}"/>`;
   } else {
     const r = Math.min(style.radius ?? 0, w / 2, h / 2);
     body = `<rect x="${sw / 2}" y="${sw / 2}" width="${Math.max(1, w - sw)}" height="${Math.max(1, h - sw)}" rx="${r}"/>`;

@@ -6,7 +6,7 @@ import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { isSpreadLayout } from "../shared/engine/layouts";
 import { backgroundCanvasSvg } from "../shared/patterns";
-import { graphicSvg, shapeSvg, type GraphicStyle, type ShapeStyle } from "../shared/designs";
+import { graphicSvg, shapeMaskSvg, shapeSvg, type GraphicStyle, type ShapeStyle } from "../shared/designs";
 import type { StockVectorData } from "@shared/api";
 
 const MM_PER_INCH = 25.4;
@@ -160,6 +160,15 @@ function vectorElementSvg(
   return graphicSvg(style.graphicId ?? "", color, w, h, style.opacity ?? 1, strokeW);
 }
 
+/** Shapes that can frame a photo (Canva-style drop target). Line/arrow are open
+ *  paths and cannot clip a photo — they stay plain shapes. */
+const FRAME_SHAPES = new Set(["rect", "ellipse", "star"]);
+
+function shapeFrameKind(style: unknown): string | null {
+  const shape = (style as { shape?: string } | null)?.shape;
+  return shape && FRAME_SHAPES.has(shape) ? shape : null;
+}
+
 /** Rasterized buffer for a custom imported asset (SVG/PNG data URI embedded in
  *  the element style — albums stay self-contained). */
 async function assetElementBuffer(el: ExportElement, w: number, h: number): Promise<Buffer | null> {
@@ -219,6 +228,88 @@ export async function renderPageJpeg(
     if (el.type === "stock-vector" || el.type === "stock-photo") {
       const comp = await stockElementComposite(el, pageWpx, pageHpx, bleedPx, resolveStock);
       if (comp) composites.push(comp);
+      continue;
+    }
+    // Canva-style photo frame: a shape element carrying a photo renders the
+    // cover-cropped photo clipped to the shape silhouette, then the stroke on
+    // top (the stroke is the shape's own SVG with fill:none).
+    if (el.type === "shape" && el.photoId && shapeFrameKind(el.style)) {
+      const w = Math.max(1, Math.round(el.width * pageWpx));
+      const h = Math.max(1, Math.round(el.height * pageHpx));
+      const style = (el.style ?? {}) as unknown as ShapeStyle;
+      const maskSvg = shapeMaskSvg(style, w, h, el.rotation);
+      const photo = resolvePhoto(el.photoId);
+      if (!photo || !maskSvg) continue;
+
+      let pipeline = sharp(photo.path).rotate();
+      pipeline = applyImageFilters(
+        pipeline,
+        (el.style as { filters?: Record<string, number> | null } | null)?.filters ?? undefined,
+      );
+      const hasCrop = !!el.crop;
+      if (el.crop) {
+        pipeline = pipeline.extract({
+          left: Math.round(el.crop.x * photo.width),
+          top: Math.round(el.crop.y * photo.height),
+          width: Math.max(1, Math.round(el.crop.width * photo.width)),
+          height: Math.max(1, Math.round(el.crop.height * photo.height)),
+        });
+      }
+      if (el.rotation) pipeline = pipeline.rotate(el.rotation);
+
+      const photoBuf = await pipeline
+        .resize(w, h, { fit: hasCrop ? "fill" : "cover" })
+        .png()
+        .toBuffer();
+      const maskPng = await sharp(Buffer.from(maskSvg)).png().toBuffer();
+      const masked = await sharp(photoBuf)
+        .composite([{ input: maskPng, blend: "dest-in" }])
+        .png()
+        .toBuffer();
+
+      // Bleed extension mirrors the plain-image path (page-touching edges only;
+      // the frame sits inside the box, then is padded out to the bleed box).
+      let left = bleedPx + el.x * pageWpx;
+      let top = bleedPx + el.y * pageHpx;
+      let boxW = w;
+      let boxH = h;
+      if (el.x <= 0.001) {
+        left -= bleedPx;
+        boxW += bleedPx;
+      }
+      if (el.x + el.width >= 0.999) boxW += bleedPx;
+      if (el.y <= 0.001) {
+        top -= bleedPx;
+        boxH += bleedPx;
+      }
+      if (el.y + el.height >= 0.999) boxH += bleedPx;
+      const padL = Math.max(0, Math.round(bleedPx + el.x * pageWpx - left));
+      const padT = Math.max(0, Math.round(bleedPx + el.y * pageHpx - top));
+
+      composites.push({
+        input: await sharp(masked)
+          .extend({
+            left: padL,
+            top: padT,
+            right: Math.max(0, boxW - w - padL),
+            bottom: Math.max(0, boxH - h - padT),
+            background: { r: 0, g: 0, b: 0, alpha: 0 },
+          })
+          .png()
+          .toBuffer(),
+        left: Math.round(left),
+        top: Math.round(top),
+        ...(blend ? { blend: blend as sharp.OverlayOptions["blend"] } : {}),
+      });
+      const strokeOnly = !!style.strokeWidth && style.strokeWidth > 0 && style.stroke !== "none";
+      if (strokeOnly) {
+        const outlineSvg = shapeSvg({ ...style, fill: "none" }, w, h, el.rotation);
+        composites.push({
+          input: await sharp(Buffer.from(outlineSvg)).resize(boxW, boxH, { fit: "fill" }).png().toBuffer(),
+          left: Math.round(left),
+          top: Math.round(top),
+        });
+      }
       continue;
     }
     if (el.type !== "image" || !el.photoId) continue;

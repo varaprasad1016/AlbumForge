@@ -537,6 +537,12 @@ fn render_physical_pages(
         match el.kind.as_str() {
             "image" => image_els.push(el),
             "text" => text_els.push(el),
+            // Canva-style photo frames (shapes carrying a photo) render natively.
+            "shape"
+                if el.photo_id.is_some() && shape_frame_kind(el.style.as_ref()).is_some() =>
+            {
+                image_els.push(el);
+            }
             other => {
                 let key = format!("{other} element(s)");
                 if !notes.iter().any(|n| n.contains(&format!("{other} element"))) {
@@ -551,8 +557,13 @@ fn render_physical_pages(
     }
 
     for el in image_els {
-        composite_image(&mut canvas, el, sources, page_h_px, bleed_px, span_px)
-            .map_err(|e| format!("page {}: {e}", page.id))?;
+        if el.kind == "shape" && el.photo_id.is_some() && shape_frame_kind(el.style.as_ref()).is_some() {
+            composite_shape_frame(&mut canvas, el, sources, page_h_px, bleed_px, span_px)
+                .map_err(|e| format!("page {}: {e}", page.id))?;
+        } else {
+            composite_image(&mut canvas, el, sources, page_h_px, bleed_px, span_px)
+                .map_err(|e| format!("page {}: {e}", page.id))?;
+        }
     }
 
     if !text_els.is_empty() {
@@ -576,6 +587,126 @@ fn render_physical_pages(
     }
 }
 
+// ---- Canva-style photo frames (shape elements carrying a photo) ----
+
+/// Shapes that can frame a photo (Canva-style drop target). Line/arrow are open
+/// paths and cannot clip a photo — they stay plain shapes.
+fn shape_frame_kind(style: Option<&serde_json::Value>) -> Option<String> {
+    let shape = style?.get("shape")?.as_str()?;
+    matches!(shape, "rect" | "ellipse" | "star").then(|| shape.to_string())
+}
+
+/// 10-vertex star polygon (5 points, inner radius 0.42×, first point up) —
+/// shared geometry with the renderer and the SVG export pipeline.
+fn star_points(w: f64, h: f64) -> Vec<(f64, f64)> {
+    let (w, h) = (w.max(1.0), h.max(1.0));
+    let (cx, cy) = (w / 2.0, h / 2.0);
+    let r_outer = (w.min(h) / 2.0).max(1.0);
+    let r_inner = r_outer * 0.42;
+    (0..10)
+        .map(|i| {
+            let r = if i % 2 == 0 { r_outer } else { r_inner };
+            let a = (std::f64::consts::PI / 5.0) * i as f64 - std::f64::consts::FRAC_PI_2;
+            (cx + r * a.cos(), cy + r * a.sin())
+        })
+        .collect()
+}
+
+/// Point-in-polygon test for the star mask (ray casting).
+fn point_in_polygon(px: f64, py: f64, pts: &[(f64, f64)]) -> bool {
+    let mut inside = false;
+    let mut j = pts.len() - 1;
+    for i in 0..pts.len() {
+        let (xi, yi) = pts[i];
+        let (xj, yj) = pts[j];
+        if (yi > py) != (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
+/// Distance from a point to a line segment (star outline width test).
+fn point_segment_dist(px: f64, py: f64, ax: f64, ay: f64, bx: f64, by: f64) -> f64 {
+    let (vx, vy) = (bx - ax, by - ay);
+    let len2 = vx * vx + vy * vy;
+    let t = if len2 <= f64::EPSILON {
+        0.0
+    } else {
+        (((px - ax) * vx + (py - ay) * vy) / len2).clamp(0.0, 1.0)
+    };
+    let (cx, cy) = (ax + t * vx, ay + t * vy);
+    ((px - cx).powi(2) + (py - cy).powi(2)).sqrt()
+}
+
+/// Coverage (0..1) of the frame silhouette at a point inside the element box,
+/// normalised 0..1 coords. Rect = filled; ellipse = inside the radius; star =
+/// inside the polygon, or within the outline band when a stroke is drawn.
+fn frame_coverage(kind: &str, u: f64, v: f64, stroke_px: f64, box_w: f64, box_h: f64) -> bool {
+    let x = u * box_w;
+    let y = v * box_h;
+    match kind {
+        "rect" => true,
+        "ellipse" => {
+            let (dx, dy) = (x - box_w / 2.0, y - box_h / 2.0);
+            (dx * dx) / (box_w / 2.0).powi(2) + (dy * dy) / (box_h / 2.0).powi(2) <= 1.0
+        }
+        "star" => {
+            let pts = star_points(box_w, box_h);
+            if point_in_polygon(x, y, &pts) {
+                return true;
+            }
+            if stroke_px <= 0.0 {
+                return false;
+            }
+            // Outline band: keep the photo visible under the drawn stroke.
+            let half = stroke_px / 2.0 + 1.0;
+            (0..10).any(|i| {
+                let (ax, ay) = pts[i];
+                let (bx, by) = pts[(i + 1) % 10];
+                point_segment_dist(x, y, ax, ay, bx, by) <= half
+            })
+        }
+        _ => false,
+    }
+}
+
+/// Rotate a point around the box centre by `deg` (degrees, clockwise — matches
+/// the SVG rotate transform and Konva).
+fn rotate_point_cw(x: f64, y: f64, w: f64, h: f64, deg: f64) -> (f64, f64) {
+    if deg == 0.0 {
+        return (x, y);
+    }
+    let rad = deg.to_radians();
+    let (dx, dy) = (x - w / 2.0, y - h / 2.0);
+    let (sin, cos) = (rad.sin(), rad.cos());
+    (w / 2.0 + dx * cos - dy * sin, h / 2.0 + dx * sin + dy * cos)
+}
+
+/// Alpha for a photo-frame pixel: 255 inside the silhouette (plus outline band
+/// for stars with a stroke), 0 outside. `u`/`v` are the pixel's position in the
+/// element box, normalised 0..1. Used as a per-pixel `dest-in` mask.
+fn frame_alpha(kind: &str, u: f64, v: f64, stroke_px: f64, box_w: f64, box_h: f64, deg: f64) -> u8 {
+    // Un-rotate the sample point into the unrotated box space.
+    let (x, y) = rotate_point_cw(u * box_w, v * box_h, box_w, box_h, -deg);
+    if frame_coverage(kind, x / box_w.max(1e-6), y / box_h.max(1e-6), stroke_px, box_w, box_h) {
+        255
+    } else {
+        0
+    }
+}
+
+/// Stroke width for the frame outline (px at export scale), from `style`.
+fn frame_stroke_px(style: Option<&serde_json::Value>, span_px: f64) -> f64 {
+    let sw = style
+        .and_then(|s| s.get("strokeWidth"))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(2.0)
+        .max(1.0);
+    sw * span_px / 600.0
+}
+
 /// Normalised crop from the stored JSON (`{x,y,width,height}` 0..1).
 fn crop_from_value(v: &serde_json::Value) -> Option<(f32, f32, f32, f32)> {
     let o = v.as_object()?;
@@ -585,6 +716,23 @@ fn crop_from_value(v: &serde_json::Value) -> Option<(f32, f32, f32, f32)> {
         o.get("width")?.as_f64()? as f32,
         o.get("height")?.as_f64()? as f32,
     ))
+}
+
+/// `#rrggbb` → RGBA (opaque). Returns None on parse failure — callers fall back
+/// to the SVG export's default stroke colour (dark slate).
+fn hex_to_rgba(hex: &str) -> Option<[u8; 4]> {
+    let h = hex.trim().trim_start_matches('#');
+    if h.len() == 6 {
+        if let Ok(v) = u32::from_str_radix(h, 16) {
+            return Some([
+                ((v >> 16) & 0xff) as u8,
+                ((v >> 8) & 0xff) as u8,
+                (v & 0xff) as u8,
+                255,
+            ]);
+        }
+    }
+    None
 }
 
 fn hex_to_rgb(hex: &str) -> (u8, u8, u8) {
@@ -819,6 +967,115 @@ fn composite_image(
 
     let mode = blend_mode_of(el.style.as_ref()).unwrap_or(BlendMode::Normal);
     composite_into(canvas, &final_img, left.round() as i64, top.round() as i64, mode);
+    Ok(())
+}
+
+/// Canva-style photo frame: a shape element carrying a photo composites the
+/// (cover-cropped) photo masked to the shape silhouette, then an outline band
+/// in `style.stroke` on top — mirroring the Konva preview and the SVG export.
+fn composite_shape_frame(
+    canvas: &mut image::RgbaImage,
+    el: &AlbumElementDef,
+    sources: &RenderSources,
+    page_h_px: u32,
+    bleed_px: u32,
+    span_px: u32,
+) -> Result<(), String> {
+    let photo_id = el
+        .photo_id
+        .as_deref()
+        .ok_or_else(|| "frame element without photoId".to_string())?;
+    let kind = shape_frame_kind(el.style.as_ref())
+        .ok_or_else(|| "frame element without a frame shape".to_string())?;
+    let photo = sources
+        .photos
+        .get(photo_id)
+        .ok_or_else(|| format!("photo {photo_id} not found (export needs the original file)"))?;
+
+    let mut img = image::open(&photo.path)
+        .map_err(|e| format!("open {}: {e}", photo.path))?
+        .to_rgba8();
+
+    if let Some(crop) = el.crop.as_ref().and_then(crop_from_value) {
+        let (iw, ih) = (photo.width as f32, photo.height as f32);
+        let cw = (crop.2 * iw).round().clamp(1.0, iw) as u32;
+        let ch = (crop.3 * ih).round().clamp(1.0, ih) as u32;
+        let cx = (crop.0 * iw).round().clamp(0.0, (iw - cw as f32).max(0.0)) as u32;
+        let cy = (crop.1 * ih).round().clamp(0.0, (ih - ch as f32).max(0.0)) as u32;
+        img = image::imageops::crop_imm(&mut img, cx, cy, cw, ch).to_image();
+    }
+
+    let filters = parse_filters(el.style.as_ref());
+    if filters.blur > 0.0 {
+        img = image::imageops::blur(&img, filters.blur);
+    }
+    img = apply_multiplier_filters(&img, &filters);
+
+    // Frame boxes do not extend into the bleed — the silhouette stays inside
+    // the element box (parity with the SVG/Electron frame path).
+    let box_w = (el.width * span_px as f64).round().max(1.0) as u32;
+    let box_h = (el.height * page_h_px as f64).round().max(1.0) as u32;
+    let fitted = if el.crop.is_some() {
+        image::imageops::resize(&img, box_w, box_h, image::imageops::FilterType::Lanczos3)
+    } else {
+        resize_cover(&img, box_w, box_h)
+    };
+
+    let stroke_px = frame_stroke_px(el.style.as_ref(), span_px as f64);
+    let stroke_color = el
+        .style
+        .as_ref()
+        .and_then(|s| s.get("stroke"))
+        .and_then(|v| v.as_str())
+        .and_then(hex_to_rgba)
+        .unwrap_or([15, 23, 42, 255]);
+    let deg = el.rotation;
+    let bw = box_w as f64;
+    let bh = box_h as f64;
+    let stroke_on = stroke_px > 0.0
+        && el
+            .style
+            .as_ref()
+            .and_then(|s| s.get("stroke"))
+            .and_then(|v| v.as_str())
+            .map(|s| s != "none")
+            .unwrap_or(true);
+
+    let mut out = image::RgbaImage::new(box_w, box_h);
+    for (x, y, px) in fitted.enumerate_pixels() {
+        let u = x as f64 / bw;
+        let v = y as f64 / bh;
+        let a = frame_alpha(&kind, u, v, if stroke_on { stroke_px } else { 0.0 }, bw, bh, deg);
+        if a == 0 {
+            continue;
+        }
+        // Outline band: draw the stroke colour over the photo (parity with the
+        // editor's restroke-on-top pass and the SVG fill:none outline overlay).
+        let on_outline = stroke_on
+            && match kind.as_str() {
+                "star" => {
+                    let (rx, ry) = rotate_point_cw(x as f64, y as f64, bw, bh, -deg);
+                    let pts = star_points(bw, bh);
+                    (0..10).any(|i| {
+                        let (ax, ay) = pts[i];
+                        let (bx, by) = pts[(i + 1) % 10];
+                        point_segment_dist(rx, ry, ax, ay, bx, by) <= stroke_px / 2.0 + 1.0
+                    })
+                }
+                _ => false,
+            };
+        let rgba = if on_outline {
+            image::Rgba(stroke_color)
+        } else {
+            image::Rgba([px.0[0], px.0[1], px.0[2], a])
+        };
+        out.put_pixel(x, y, rgba);
+    }
+
+    let left = bleed_px as f64 + el.x * span_px as f64;
+    let top = bleed_px as f64 + el.y * page_h_px as f64;
+    let mode = blend_mode_of(el.style.as_ref()).unwrap_or(BlendMode::Normal);
+    composite_into(canvas, &out, left.round() as i64, top.round() as i64, mode);
     Ok(())
 }
 
@@ -1196,6 +1453,79 @@ fn sanitize_file_stem(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frame_shape_kind_matches_only_closed_shapes() {
+        let style = |shape: &str| serde_json::json!({ "shape": shape });
+        assert_eq!(shape_frame_kind(Some(&style("rect"))).as_deref(), Some("rect"));
+        assert_eq!(shape_frame_kind(Some(&style("ellipse"))).as_deref(), Some("ellipse"));
+        assert_eq!(shape_frame_kind(Some(&style("star"))).as_deref(), Some("star"));
+        assert_eq!(shape_frame_kind(Some(&style("line"))), None);
+        assert_eq!(shape_frame_kind(Some(&style("arrow"))), None);
+        assert_eq!(shape_frame_kind(None), None);
+    }
+
+    #[test]
+    fn star_points_first_vertex_up_and_symmetric() {
+        let pts = star_points(200.0, 200.0);
+        assert_eq!(pts.len(), 10);
+        // First point is straight up (cx, cy - rOuter).
+        assert!((pts[0].0 - 100.0).abs() < 1e-6);
+        assert!(pts[0].1 < 100.0);
+        // Outer vertices sit on the bounding circle.
+        for (i, (x, y)) in pts.iter().enumerate() {
+            if i % 2 == 0 {
+                let d = ((x - 100.0).powi(2) + (y - 100.0).powi(2)).sqrt();
+                assert!((d - 100.0).abs() < 1e-6, "outer vertex {i} off circle: {d}");
+            }
+        }
+    }
+
+    #[test]
+    fn frame_coverage_shapes() {
+        // Rect covers everything.
+        assert!(frame_coverage("rect", 0.0, 0.0, 0.0, 100.0, 100.0));
+        // Ellipse: centre in, corner out.
+        assert!(frame_coverage("ellipse", 0.5, 0.5, 0.0, 100.0, 100.0));
+        assert!(!frame_coverage("ellipse", 0.0, 0.0, 0.0, 100.0, 100.0));
+        // Star: centre in, midpoints of the bounding box edges out.
+        assert!(frame_coverage("star", 0.5, 0.5, 0.0, 100.0, 100.0));
+        assert!(!frame_coverage("star", 0.0, 0.5, 0.0, 100.0, 100.0));
+        // Star outline band includes points near an edge vertex.
+        let pts = star_points(100.0, 100.0);
+        let (vx, vy) = pts[0];
+        assert!(frame_coverage(
+            "star",
+            vx / 100.0,
+            (vy + 2.0) / 100.0,
+            4.0,
+            100.0,
+            100.0
+        ));
+    }
+
+    #[test]
+    fn frame_alpha_rotates_with_the_element() {
+        // Ellipse at 0°: top-left corner is outside.
+        assert_eq!(frame_alpha("ellipse", 0.0, 0.0, 0.0, 100.0, 100.0, 0.0), 0);
+        // Rotating the element 90° moves the top-left corner into the inscribed circle region
+        // (corner distance from centre is invariant — but the 90° case must equal the 0° case
+        // at the correspondingly rotated point; verify the top-centre point maps in/out).
+        assert_eq!(frame_alpha("ellipse", 0.5, 0.0, 0.0, 100.0, 100.0, 0.0), 255);
+        // 180° rotation maps (0.5, 0.0) to (0.5, 1.0) — still inside.
+        assert_eq!(frame_alpha("ellipse", 0.5, 0.0, 0.0, 100.0, 100.0, 180.0), 255);
+        // (0.1, 0.1) is outside at 0°, and stays outside under 180° ((0.9, 0.9)).
+        assert_eq!(frame_alpha("ellipse", 0.1, 0.1, 0.0, 100.0, 100.0, 0.0), 0);
+        assert_eq!(frame_alpha("ellipse", 0.1, 0.1, 0.0, 100.0, 100.0, 180.0), 0);
+    }
+
+    #[test]
+    fn frame_stroke_px_scales_with_span() {
+        assert!((frame_stroke_px(None, 600.0) - 2.0).abs() < 1e-6);
+        assert!((frame_stroke_px(Some(&serde_json::json!({ "strokeWidth": 4 })), 1200.0) - 8.0).abs() < 1e-6);
+        // Zero/absent widths clamp to the 1px hairline.
+        assert!(frame_stroke_px(Some(&serde_json::json!({ "strokeWidth": 0 })), 600.0) >= 1.0);
+    }
 
     fn tiny_photo(path: &Path, w: u32, h: u32) {
         let img = image::RgbaImage::from_fn(w, h, |x, y| {

@@ -112,6 +112,34 @@ describe("spread export", () => {
     expect(doc.getPageCount()).toBe(1);
   });
 
+  it("renders a photo dropped into a shape frame (masked, cover-cropped)", async () => {
+    await makePhoto("p5", 3000, 2000);
+    const page: ExportPage = {
+      layoutKey: "full_bleed",
+      background: { color: "#ffffff" },
+      elements: [
+        {
+          type: "shape",
+          photoId: "p5",
+          x: 0.1,
+          y: 0.1,
+          width: 0.3,
+          height: 0.3,
+          rotation: 0,
+          crop: null,
+          text: null,
+          style: { shape: "ellipse", fill: "none", stroke: "#8a7a5c", strokeWidth: 4, opacity: 1 },
+          z: 1,
+        },
+      ],
+    };
+    const pdf = await buildPdf([page], resolvePhoto, 100, 100, 60, 3);
+    const doc = await PDFDocument.load(pdf);
+    expect(doc.getPageCount()).toBe(1);
+    // The masked photo is embedded as an image XObject referenced by the page.
+    expect(Buffer.from(pdf).toString("latin1")).toContain("/Image");
+  });
+
   it("renders stock-vector (recolorable paths) and stock-photo layers", async () => {
     await makePhoto("p4", 3000, 2000);
     // A real transparent PNG to stand in for a downloaded stock asset.
