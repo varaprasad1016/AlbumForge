@@ -8,6 +8,7 @@ import {
   Line,
   Path,
   Rect,
+  Shape,
   Stage,
   Star,
   Text as KText,
@@ -602,7 +603,11 @@ export default function AlbumEditor({
         if (now !== before) return prev;
         return prev.map((x) => (x.id === p.id ? updated : x));
       });
-      setSelectedIds(new Set());
+      // Do NOT clear the selection here. savePage keeps the client element id
+      // stable (ipc.ts), so selection ids stay valid across a save. Clearing on
+      // every persist wiped the transformer/inspector ~1.2s after each edit via
+      // the autosave path. Callers that must reset selection (delete, layout
+      // swap, apply-design) do so explicitly.
       onPageUpdated(updated);
       toast("Page saved");
     } finally {
@@ -646,7 +651,7 @@ export default function AlbumEditor({
 
   function replacePhoto(photoId: string) {
     if (!selected) return;
-    void persist(
+    commit(
       pagesState.map((p) =>
         p.id === page.id
           ? { ...p, elements: p.elements.map((e) => (e.id === selected.id ? { ...e, photoId, crop: null } : e)) }
@@ -658,7 +663,7 @@ export default function AlbumEditor({
 
   function deleteSelected() {
     if (selectedIds.size === 0) return;
-    void persist(
+    commit(
       pagesState.map((p) =>
         p.id === page.id ? { ...p, elements: p.elements.filter((e) => !selectedIds.has(e.id)) } : p,
       ),
@@ -1072,7 +1077,7 @@ export default function AlbumEditor({
         hitEl.type === "stock-photo"
           ? { type: "image", photoId: data.id, crop: null, style: null }
           : { photoId: data.id, crop: null };
-      void persist(
+      commit(
         pagesState.map((p) =>
           p.id === page.id
             ? {
@@ -1088,7 +1093,7 @@ export default function AlbumEditor({
 
     // 2) Replace mode with an active selection → replace it in place.
     if (picker === "replace" && selected) {
-      void persist(
+      commit(
         pagesState.map((p) =>
           p.id === page.id
             ? {
@@ -1818,7 +1823,7 @@ export default function AlbumEditor({
                 listening={false}
               />
             )}
-            {elements.map((el) => {
+            {[...elements].sort((a, b) => a.z - b.z).map((el) => {
               const cropMode = cropModeId === el.id;
               return (
                 <ElementNode
@@ -2217,7 +2222,7 @@ export default function AlbumEditor({
                     <option value="soft-light">Soft light</option>
                   </select>
                 </div>
-                {selected.type === "image" && (
+                {isFramedEl(selected) && (
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
                       <label className="field-label !mb-0">Filters</label>
@@ -2286,7 +2291,7 @@ export default function AlbumEditor({
                   </div>
                 )}
               </div>
-              {selected.type === "image" && (
+              {isFramedEl(selected) && (
                 <div className="space-y-2 border-t border-slate-100 pt-3">
                   <div className="flex items-center gap-2">
                     <button
@@ -2684,7 +2689,7 @@ function MiniPage({ page, aspect }: { page: AlbumPage; aspect: number }) {
         backgroundRepeat: "repeat",
       }}
     >
-      {page.elements.map((el) => {
+      {[...page.elements].sort((a, b) => a.z - b.z).map((el) => {
         const box: React.CSSProperties = {
           position: "absolute",
           left: `${el.x * 100}%`,
@@ -2858,6 +2863,7 @@ function ElementNode({
   const w = el.width * pageW;
   const h = el.height * pageH;
   const dragOriginRef = useRef<{ x: number; y: number } | null>(null);
+  const filterImgRef = useRef<Konva.Image | null>(null);
   const styleMeta = (el.style ?? {}) as {
     blendMode?: string;
     filters?: Record<string, number>;
@@ -2891,6 +2897,25 @@ function ElementNode({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [img]);
+
+  // Konva applies a node's filters only while the node is cached. Cache the
+  // filtered photo node whenever its source / size / crop / filters change so
+  // the adjustment sliders actually show on screen (they already bake into
+  // export); clear the cache when no filters are set so it draws normally.
+  const filterSig = JSON.stringify(styleMeta.filters ?? null);
+  useEffect(() => {
+    const node = filterImgRef.current;
+    if (!node) return;
+    const hasFilters = !!styleMeta.filters && Object.keys(styleMeta.filters).length > 0;
+    try {
+      if (hasFilters && w > 0 && h > 0) node.cache();
+      else node.clearCache();
+      node.getLayer()?.batchDraw();
+    } catch {
+      /* node/layer not ready this tick — a later render re-runs this effect */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [img, w, h, el.crop, filterSig, maskActive]);
 
   if (el.type === "shape") {
     const s = (el.style ?? {}) as {
@@ -2969,6 +2994,7 @@ function ElementNode({
         {showPhoto && (
           <Group key={clipKey} clipFunc={clipFuncFor(frameKind!, s, w, h)}>
             <KImage
+              ref={filterImgRef}
               image={img}
               crop={sourceCropPx(natW, natH, w, h, el.crop)}
               width={w}
@@ -2979,15 +3005,31 @@ function ElementNode({
           </Group>
         )}
         {!showPhoto && shapeNode}
-        <Rect
-          width={w}
-          height={h}
-          stroke={showPhoto ? stroke : "#5b5bd6"}
-          strokeWidth={showPhoto ? Math.max(1, swFrame) : 1}
-          dash={frameTarget && !selected ? [4, 4] : undefined}
-          listening={false}
-          visible={showPhoto || selected || frameTarget}
-        />
+        {/* Frame border traces the real silhouette (same path as the clip and
+            both exporters) instead of a bounding-box rect, so an ellipse/star
+            frame no longer shows a rectangular border on screen. */}
+        {showPhoto && (
+          <Shape
+            sceneFunc={(ctx, shape) => {
+              clipFuncFor(frameKind!, s, w, h)(ctx);
+              ctx.strokeShape(shape);
+            }}
+            stroke={stroke}
+            strokeWidth={Math.max(1, swFrame)}
+            listening={false}
+          />
+        )}
+        {/* Selection / drop-target highlight (bounding box). */}
+        {(selected || frameTarget) && (
+          <Rect
+            width={w}
+            height={h}
+            stroke="#5b5bd6"
+            strokeWidth={1}
+            dash={frameTarget && !selected ? [4, 4] : undefined}
+            listening={false}
+          />
+        )}
         {cropMode && <Rect width={w} height={h} stroke="#f43f5e" strokeWidth={1.5} dash={[6, 4]} listening={false} />}
       </Group>
     );
@@ -3188,6 +3230,7 @@ function ElementNode({
     >
       {img && (maskedCanvas || cropPx) ? (
         <KImage
+          ref={filterImgRef}
           image={maskedCanvas ?? img}
           crop={maskedCanvas || !cropPx ? undefined : cropPx}
           width={w}
