@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import sharp from "sharp";
 import { PDFDocument } from "pdf-lib";
-import { buildPdf, ExportPage } from "./export";
+import { buildPdf, ExportPage, renderPageJpeg } from "./export";
 
 const photos = new Map<string, { path: string; width: number; height: number }>();
 
@@ -138,6 +138,36 @@ describe("spread export", () => {
     expect(doc.getPageCount()).toBe(1);
     // The masked photo is embedded as an image XObject referenced by the page.
     expect(Buffer.from(pdf).toString("latin1")).toContain("/Image");
+  });
+
+  it("renders the photo inside a shape frame (visible, not an empty outline), rotated and not", async () => {
+    await makePhoto("pf", 1000, 1000); // solid red 200,40,40
+    const frame = (rotation: number): ExportPage["elements"][number] => ({
+      type: "shape",
+      photoId: "pf",
+      x: 0.25,
+      y: 0.25,
+      width: 0.5,
+      height: 0.5,
+      rotation,
+      crop: null,
+      text: null,
+      style: { shape: "ellipse", fill: "none", stroke: "#0f172a", strokeWidth: 4, opacity: 1 },
+      z: 0,
+    });
+    for (const rot of [0, 30]) {
+      const page: ExportPage = { layoutKey: "full_bleed", background: { color: "#ffffff" }, elements: [frame(rot)] };
+      const jpeg = await renderPageJpeg(page, resolvePhoto, 400, 400, 0);
+      const { data, info } = await sharp(jpeg).raw().toBuffer({ resolveWithObject: true });
+      const cx = Math.floor(info.width / 2);
+      const cy = Math.floor(info.height / 2);
+      const i = (cy * info.width + cx) * info.channels;
+      // The frame centre must be the red photo, not the white background — this
+      // guards the regression where photo-frame shapes exported as empty outlines.
+      expect(data[i]).toBeGreaterThan(120); // red high
+      expect(data[i + 1]).toBeLessThan(120); // green low
+      expect(data[i + 2]).toBeLessThan(120); // blue low
+    }
   });
 
   it("renders stock-vector (recolorable paths) and stock-photo layers", async () => {

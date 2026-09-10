@@ -188,6 +188,60 @@ async function assetElementBuffer(el: ExportElement, w: number, h: number): Prom
   }
 }
 
+/** Rotate a finished (unrotated) boxW×boxH RGBA tile about the box's TOP-LEFT
+ *  corner by `deg` and return a sharp composite placed to land exactly where the
+ *  editor shows it. The Konva group pivots at its origin (top-left); sharp
+ *  rotates about the tile centre and expands to the rotated bounding box, so we
+ *  map the box centre through the same rotation and offset by half the rotated
+ *  size. Returns null when the rotated tile falls entirely off the canvas. */
+async function placeRotated(
+  tile: Buffer,
+  boxW: number,
+  boxH: number,
+  deg: number,
+  boxLeft: number,
+  boxTop: number,
+  blend?: string,
+): Promise<sharp.OverlayOptions | null> {
+  const rotated = await sharp(tile)
+    .rotate(deg, { background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .png()
+    .toBuffer();
+  const meta = await sharp(rotated).metadata();
+  const outW = meta.width ?? boxW;
+  const outH = meta.height ?? boxH;
+  const rad = (deg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  // Page position of the box centre after rotating about the top-left corner.
+  const cx = boxLeft + (boxW / 2) * cos - (boxH / 2) * sin;
+  const cy = boxTop + (boxW / 2) * sin + (boxH / 2) * cos;
+  let left = Math.round(cx - outW / 2);
+  let top = Math.round(cy - outH / 2);
+  // sharp's composite offset must be non-negative; clip the tile where it spills
+  // past the top/left canvas edges (right/bottom overflow sharp clips itself).
+  let src = rotated;
+  let ex = 0;
+  let ey = 0;
+  let cw = outW;
+  let ch = outH;
+  if (left < 0) {
+    ex = -left;
+    cw = outW + left;
+    left = 0;
+  }
+  if (top < 0) {
+    ey = -top;
+    ch = outH + top;
+    top = 0;
+  }
+  if (cw <= 0 || ch <= 0) return null;
+  if (ex > 0 || ey > 0 || cw !== outW || ch !== outH) {
+    src = await sharp(rotated).extract({ left: ex, top: ey, width: cw, height: ch }).png().toBuffer();
+  }
+  return { input: src, left, top, ...(blend ? { blend: blend as sharp.OverlayOptions["blend"] } : {}) };
+}
+
 export async function renderPageJpeg(
   page: ExportPage,
   resolvePhoto: PhotoResolver,
@@ -206,7 +260,11 @@ export async function renderPageJpeg(
   const elements = page.elements.slice().sort((a, b) => a.z - b.z);
   for (const el of elements) {
     const blend = blendModeOf(el);
-    if (el.type === "shape" || el.type === "graphic") {
+    // Plain vector shapes/graphics. A shape carrying a photo is a Canva-style
+    // photo FRAME, not a plain vector — it must fall through to the frame block
+    // below (otherwise it renders as an empty outline with no photo).
+    const isPhotoFrame = el.type === "shape" && !!el.photoId && !!shapeFrameKind(el.style);
+    if ((el.type === "shape" && !isPhotoFrame) || el.type === "graphic") {
       const w = Math.max(1, Math.round(el.width * pageWpx));
       const h = Math.max(1, Math.round(el.height * pageHpx));
       let buf: Buffer | null = null;
@@ -237,8 +295,40 @@ export async function renderPageJpeg(
       const w = Math.max(1, Math.round(el.width * pageWpx));
       const h = Math.max(1, Math.round(el.height * pageHpx));
       const style = (el.style ?? {}) as unknown as ShapeStyle;
-      const maskSvg = shapeMaskSvg(style, w, h, el.rotation);
       const photo = resolvePhoto(el.photoId);
+      if (el.rotation) {
+        // Rotated frame: build the UNrotated tile (cover-crop → silhouette mask
+        // → stroke) at box size, then rotate the whole tile about the box's
+        // top-left corner exactly like the Konva group on screen — no photo
+        // pre-rotation, no squish, no rotation-baked mask/corner loss.
+        const maskUnrot = shapeMaskSvg(style, w, h, 0);
+        if (!photo || !maskUnrot) continue;
+        const frameFilters = (el.style as { filters?: Record<string, number> | null } | null)?.filters ?? undefined;
+        let fp = applyImageFilters(sharp(photo.path).rotate(), frameFilters);
+        if (el.crop) {
+          fp = fp.extract({
+            left: Math.round(el.crop.x * photo.width),
+            top: Math.round(el.crop.y * photo.height),
+            width: Math.max(1, Math.round(el.crop.width * photo.width)),
+            height: Math.max(1, Math.round(el.crop.height * photo.height)),
+          });
+        }
+        const photoBuf = await fp.resize(w, h, { fit: el.crop ? "fill" : "cover" }).png().toBuffer();
+        // Mask in its OWN composite (dest-in must not share a composite() call
+        // with the stroke — chaining dest-in with a later 'over' drops the photo),
+        // then lay the silhouette stroke over the masked photo as a second pass.
+        const maskPng = await sharp(Buffer.from(maskUnrot)).png().toBuffer();
+        let tile = await sharp(photoBuf).composite([{ input: maskPng, blend: "dest-in" }]).png().toBuffer();
+        if (!!style.strokeWidth && style.strokeWidth > 0 && style.stroke !== "none") {
+          const outline = shapeSvg({ ...style, fill: "none" }, w, h, 0);
+          const outlinePng = await sharp(Buffer.from(outline)).resize(w, h, { fit: "fill" }).png().toBuffer();
+          tile = await sharp(tile).composite([{ input: outlinePng }]).png().toBuffer();
+        }
+        const rc = await placeRotated(tile, w, h, el.rotation, bleedPx + el.x * pageWpx, bleedPx + el.y * pageHpx, blend);
+        if (rc) composites.push(rc);
+        continue;
+      }
+      const maskSvg = shapeMaskSvg(style, w, h, el.rotation);
       if (!photo || !maskSvg) continue;
 
       let pipeline = sharp(photo.path).rotate();
@@ -334,7 +424,21 @@ export async function renderPageJpeg(
       pipeline = pipeline.extract(cropPx);
     }
     if (el.rotation) {
-      pipeline = pipeline.rotate(el.rotation);
+      // Rotated image: build the unrotated cover/fill tile at box size, then
+      // rotate the whole tile about the box top-left (screen parity) instead of
+      // pre-rotating the photo and squishing it into an upright box.
+      const rBoxW = Math.max(1, Math.round(el.width * pageWpx));
+      const rBoxH = Math.max(1, Math.round(el.height * pageHpx));
+      let tile = await pipeline.resize(rBoxW, rBoxH, { fit: hasCrop ? "fill" : "cover" }).png().toBuffer();
+      if (mattePath) {
+        let mattePipeline = sharp(mattePath);
+        if (cropPx) mattePipeline = mattePipeline.extract(cropPx);
+        const matte = await mattePipeline.resize(rBoxW, rBoxH, { fit: "fill" }).png().toBuffer();
+        tile = await sharp(tile).composite([{ input: matte, blend: "dest-in" }]).png().toBuffer();
+      }
+      const rc = await placeRotated(tile, rBoxW, rBoxH, el.rotation, bleedPx + el.x * pageWpx, bleedPx + el.y * pageHpx, blend);
+      if (rc) composites.push(rc);
+      continue;
     }
 
     let boxW = Math.round(el.width * pageWpx);
@@ -424,7 +528,8 @@ export async function renderSpreadJpegs(
   const elements = page.elements.slice().sort((a, b) => a.z - b.z);
   for (const el of elements) {
     const blend = blendModeOf(el);
-    if (el.type === "shape" || el.type === "graphic") {
+    const isPhotoFrame = el.type === "shape" && !!el.photoId && !!shapeFrameKind(el.style);
+    if ((el.type === "shape" && !isPhotoFrame) || el.type === "graphic") {
       const w = Math.max(1, Math.round(el.width * spreadWpx));
       const h = Math.max(1, Math.round(el.height * pageHpx));
       let buf: Buffer | null = null;
@@ -446,6 +551,48 @@ export async function renderSpreadJpegs(
     if (el.type === "stock-vector" || el.type === "stock-photo") {
       const comp = await stockElementComposite(el, spreadWpx, pageHpx, bleedPx, resolveStock);
       if (comp) composites.push(comp);
+      continue;
+    }
+    // Canva-style photo frame on a spread (silhouette-masked photo + stroke,
+    // rotated as one tile). Mirrors the single-page frame path with spreadWpx.
+    if (isPhotoFrame) {
+      const w = Math.max(1, Math.round(el.width * spreadWpx));
+      const h = Math.max(1, Math.round(el.height * pageHpx));
+      const style = (el.style ?? {}) as unknown as ShapeStyle;
+      const photo = resolvePhoto(el.photoId!);
+      const maskUnrot = shapeMaskSvg(style, w, h, 0);
+      if (!photo || !maskUnrot) continue;
+      const frameFilters = (el.style as { filters?: Record<string, number> | null } | null)?.filters ?? undefined;
+      let fp = applyImageFilters(sharp(photo.path).rotate(), frameFilters);
+      if (el.crop) {
+        fp = fp.extract({
+          left: Math.round(el.crop.x * photo.width),
+          top: Math.round(el.crop.y * photo.height),
+          width: Math.max(1, Math.round(el.crop.width * photo.width)),
+          height: Math.max(1, Math.round(el.crop.height * photo.height)),
+        });
+      }
+      const photoBuf = await fp.resize(w, h, { fit: el.crop ? "fill" : "cover" }).png().toBuffer();
+      const maskPng = await sharp(Buffer.from(maskUnrot)).png().toBuffer();
+      let tile = await sharp(photoBuf).composite([{ input: maskPng, blend: "dest-in" }]).png().toBuffer();
+      if (!!style.strokeWidth && style.strokeWidth > 0 && style.stroke !== "none") {
+        const outline = shapeSvg({ ...style, fill: "none" }, w, h, 0);
+        const outlinePng = await sharp(Buffer.from(outline)).resize(w, h, { fit: "fill" }).png().toBuffer();
+        tile = await sharp(tile).composite([{ input: outlinePng }]).png().toBuffer();
+      }
+      const boxLeft = bleedPx + el.x * spreadWpx;
+      const boxTop = bleedPx + el.y * pageHpx;
+      if (el.rotation) {
+        const rc = await placeRotated(tile, w, h, el.rotation, boxLeft, boxTop, blend);
+        if (rc) composites.push(rc);
+      } else {
+        composites.push({
+          input: tile,
+          left: Math.round(boxLeft),
+          top: Math.round(boxTop),
+          ...(blend ? { blend: blend as sharp.OverlayOptions["blend"] } : {}),
+        });
+      }
       continue;
     }
     if (el.type !== "image" || !el.photoId) continue;
@@ -470,7 +617,21 @@ export async function renderSpreadJpegs(
       pipeline = pipeline.extract(cropPx);
     }
     if (el.rotation) {
-      pipeline = pipeline.rotate(el.rotation);
+      // Rotated image on a spread: rotate the finished box tile about its
+      // top-left (screen parity), not the source photo squished into an
+      // upright box. Same model as the single-page path with spreadWpx.
+      const rBoxW = Math.max(1, Math.round(el.width * spreadWpx));
+      const rBoxH = Math.max(1, Math.round(el.height * pageHpx));
+      let tile = await pipeline.resize(rBoxW, rBoxH, { fit: hasCrop ? "fill" : "cover" }).png().toBuffer();
+      if (mattePath) {
+        let mattePipeline = sharp(mattePath);
+        if (cropPx) mattePipeline = mattePipeline.extract(cropPx);
+        const matte = await mattePipeline.resize(rBoxW, rBoxH, { fit: "fill" }).png().toBuffer();
+        tile = await sharp(tile).composite([{ input: matte, blend: "dest-in" }]).png().toBuffer();
+      }
+      const rc = await placeRotated(tile, rBoxW, rBoxH, el.rotation, bleedPx + el.x * spreadWpx, bleedPx + el.y * pageHpx, blend);
+      if (rc) composites.push(rc);
+      continue;
     }
 
     let boxW = Math.round(el.width * spreadWpx);
