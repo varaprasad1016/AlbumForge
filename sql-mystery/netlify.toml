@@ -1,0 +1,31 @@
+# Netlify configuration for The Ashvale Files.
+# Static site: nothing to build, nothing to install.
+#
+# Deploying from this repository: set the site's
+#   Base directory   = sql-mystery
+#   Publish directory = sql-mystery
+#   Build command     = (leave empty)
+# Deploying by drag-and-drop: just drop this folder on app.netlify.com/drop.
+
+[build]
+  publish = "."
+  command = ""
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "SAMEORIGIN"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "geolocation=(), microphone=(), camera=()"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=3600"
+
+# Single page — send unknown paths to the game rather than a 404.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
